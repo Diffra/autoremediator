@@ -2,6 +2,17 @@
 
 > Agentic remediation for Node.js dependencies. Fixes vulnerable npm dependencies from a CVE/GHSA id or scanner output: version bump, package-manager override, or an optional model-generated patch. Verifies every change, rolls back failures, and reports what it could not fix. Runs as a CLI, SDK, GitHub Action, GitHub App, MCP server or HTTP server. Requires Node.js 26+.
 
+## When to use it
+
+Use it when a project's npm, pnpm, Yarn, Bun or Deno dependencies have a known vulnerability (a CVE or GHSA id, `npm audit` output, a SARIF report) and the goal is a verified fix, not a report. Use `guard` or the `guardPackage` tool before adding a dependency. Do not use it for: non-JavaScript ecosystems, finding vulnerabilities in your own code, or secret scanning.
+
+## Install
+
+- Claude Code: `/plugin marketplace add Diffra/autoremediator`, then `/plugin install autoremediator@autoremediator`
+- Any MCP client: command `npx`, args `["-y", "autoremediator", "mcp"]` (stdio). Registry name `io.github.Diffra/autoremediator`
+- Project setup for Claude Code, Cursor, Copilot, Codex and Gemini CLI: `npx autoremediator init`
+- No install: `npx autoremediator --audit --dry-run` shows the plan and changes nothing
+
 ## Behavior
 
 For each installed package in a vulnerable range, strategies are tried in order:
@@ -13,7 +24,7 @@ Changes are installed, optionally tested/type-checked, and rolled back on failur
 
 ## Entry points
 
-- CLI: `autoremediator <CVE|GHSA|scan-file> [--dry-run] [--run-tests] [--ci]`, plus `evidence-pack`, `prove`, `radar`, `maintain`, `vex show`, `freshness`, `memory`, `policy compile|explain`, `autonomy status|explain`, `recipes ...`, `trace run`, `assess`, `symbols`, `incident`, `premortem`, `bisect`, `diet`, `hook install|uninstall|status` (git hooks that run `diff` on push/merge; docs/guides/git-hooks.md), `init` (sets up the project and coding-agent configuration), `guard <packages>` or `guard --git-diff` (judge packages before install: exit 0 clear, 3 check first, 4 blocked), `guard-hook --host claude-code|cursor|copilot` (agent pre-command hook), `plan`, `runs`, `scan`, `update-outdated`, `portfolio`, `diff`, `triage`, `patches`, `reachability`, `evaluate`. With `--ci`, exit codes: 0 fixed or nothing to do, 1 failed, 2 partly fixed, 3 waiting for approval, 4 blocked by policy
+- CLI: `autoremediator mcp` (starts the MCP server on stdio; `--http` serves HTTP), `autoremediator <CVE|GHSA|scan-file> [--dry-run] [--run-tests] [--ci]`, plus `evidence-pack`, `prove`, `radar`, `maintain`, `vex show`, `freshness`, `memory`, `policy compile|explain`, `autonomy status|explain`, `recipes ...`, `trace run`, `assess`, `symbols`, `incident`, `premortem`, `bisect`, `diet`, `hook install|uninstall|status` (git hooks that run `diff` on push/merge; docs/guides/git-hooks.md), `init` (sets up the project and coding-agent configuration), `guard <packages>` or `guard --git-diff` (judge packages before install: exit 0 clear, 3 check first, 4 blocked), `guard-hook --host claude-code|cursor|copilot` (agent pre-command hook), `plan`, `runs`, `scan`, `update-outdated`, `portfolio`, `diff`, `triage`, `patches`, `reachability`, `evaluate`. With `--ci`, exit codes: 0 fixed or nothing to do, 1 failed, 2 partly fixed, 3 waiting for approval, 4 blocked by policy
 - SDK: `init`, `remediate`, `planRemediation`, `applyPlan`, `verifyRun`, `rollbackRun`, `getRun`, `listRuns`, attempt functions, `remediateFromScan`, `remediatePortfolio`, `updateOutdated`, `scanDelta`, `checkReachability`, `evaluatePackage`, `guardPackage`, patch-artifact functions, job functions (`submit*Job`, `pollJob`), `toCiSummary`, `toSarifOutput`, `toCycloneDxVex`, `createLlmPatchGenerator`
 - MCP (stdio, `autoremediator-mcp`): `health`, `remediate`, `planRemediation`, `remediateFromScan`, `remediatePortfolio`, `listPatchArtifacts`, `inspectPatchArtifact`, `validatePatchArtifact`, `reconcilePatchArtifacts`, `applyPlan`, `resumeRun`, `rollbackRun`, `verifyRun`, `startAttempt`, `proposePatch`, `verifyAttempt`, `finalizeAttempt`, `abandonAttempt`, `getRun`, `listRuns`, `updateOutdated`, `toVex`, `submitRemediateJob`, `submitScanJob`, `submitPortfolioJob`, `pollJob`, `checkReachability`, `evaluatePackage`, `guardPackage`, `getAutonomy`, `analyzeDependencies`, `scanDelta`, `listRecipes`, `applyRecipe`, `assessUpgrade`, `findVulnerableSymbols`, `incident`, `premortem`, `compilePolicy`, `explainPolicy`, `readMaintainerVex`, `generateProofOfFix`, `radar`, `freshnessReport`, `planFreshnessStep`, `listMemory`, `buildEvidencePack`
 - HTTP: `POST /remediate`, `/plan-remediation`, `/remediate-from-scan`, `/remediate-portfolio`, `/update-outdated`, `/patches/{list,inspect,validate}`, `/vex`, `/jobs/{remediate,scan,portfolio}`, `GET /jobs/:id`, `GET /health`, `GET /openapi.json`. Authentication is required (`AUTOREMEDIATOR_API_TOKENS` or `AUTOREMEDIATOR_JWT_SECRET`).

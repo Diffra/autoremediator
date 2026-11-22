@@ -1,17 +1,32 @@
 {
   "name": "autoremediator",
-  "description": "Agentic remediation for vulnerable npm dependencies: plan, apply with verification, repair upgrades that break the project, roll back.",
+  "displayName": "Autoremediator",
+  "version": "0.25.0",
+  "description": "Fix vulnerable npm dependencies from a CVE or GHSA id or an audit: plans the smallest safe upgrade or override, repairs code the upgrade breaks, verifies it, rolls back on failure. Also checks a package before you install it.",
   "author": {
-    "name": "Rawlings"
+    "name": "Rawlings",
+    "url": "https://github.com/Rawlings"
   },
-  "homepage": "https://github.com/Diffra/autoremediator/tree/master/docs",
+  "homepage": "https://github.com/Diffra/autoremediator",
   "repository": "https://github.com/Diffra/autoremediator",
   "license": "MIT",
   "keywords": [
     "security",
-    "npm",
+    "vulnerability",
     "cve",
+    "ghsa",
+    "npm",
+    "npm-audit",
+    "pnpm",
+    "yarn",
     "dependencies",
-    "remediation"
-  ]
+    "dependency-security",
+    "remediation",
+    "supply-chain",
+    "dependabot-alternative",
+    "mcp",
+    "sarif"
+  ],
+  "documentationUrl": "https://github.com/Diffra/autoremediator/tree/master/docs",
+  "supportUrl": "https://github.com/Diffra/autoremediator/issues"
 }

@@ -1,0 +1,30 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.Diffra/autoremediator",
+  "title": "Autoremediator",
+  "description": "Fix vulnerable npm dependencies safely: plan, apply, verify, roll back. Vets packages first.",
+  "websiteUrl": "https://github.com/Diffra/autoremediator/tree/master/docs",
+  "repository": {
+    "url": "https://github.com/Diffra/autoremediator",
+    "source": "github",
+    "subfolder": "packages/core"
+  },
+  "version": "0.25.0",
+  "packages": [
+    {
+      "registryType": "npm",
+      "identifier": "autoremediator",
+      "version": "0.25.0",
+      "runtimeHint": "npx",
+      "transport": {
+        "type": "stdio"
+      },
+      "packageArguments": [
+        {
+          "type": "positional",
+          "value": "mcp"
+        }
+      ]
+    }
+  ]
+}

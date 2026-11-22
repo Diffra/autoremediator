@@ -4,15 +4,33 @@
     "name": "Rawlings",
     "url": "https://github.com/Rawlings"
   },
+  "description": "Fix vulnerable npm dependencies from a CVE or GHSA id or an audit: plans the smallest safe upgrade or override, repairs code the upgrade breaks, verifies it, rolls back on failure. Also checks a package before you install it.",
   "metadata": {
-    "description": "Agentic remediation for vulnerable npm dependencies: plan, apply with verification, repair upgrades that break the project, roll back."
+    "description": "Fix vulnerable npm dependencies from a CVE or GHSA id or an audit: plans the smallest safe upgrade or override, repairs code the upgrade breaks, verifies it, rolls back on failure. Also checks a package before you install it."
   },
   "plugins": [
     {
       "name": "autoremediator",
       "source": "./integrations/claude-code",
-      "description": "Agentic remediation for vulnerable npm dependencies: plan, apply with verification, repair upgrades that break the project, roll back.",
-      "category": "security"
+      "description": "Fix vulnerable npm dependencies from a CVE or GHSA id or an audit: plans the smallest safe upgrade or override, repairs code the upgrade breaks, verifies it, rolls back on failure. Also checks a package before you install it.",
+      "category": "security",
+      "tags": [
+        "security",
+        "vulnerability",
+        "cve",
+        "ghsa",
+        "npm",
+        "npm-audit",
+        "pnpm",
+        "yarn",
+        "dependencies",
+        "dependency-security",
+        "remediation",
+        "supply-chain",
+        "dependabot-alternative",
+        "mcp",
+        "sarif"
+      ]
     }
   ]
 }

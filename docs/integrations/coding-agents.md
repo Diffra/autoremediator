@@ -55,7 +55,8 @@ range of the CLI that wrote it. Re-run `init` after upgrading to move it.
 
 ## Claude Code plugin
 
-Instead of per-project files, install the plugin once:
+Instead of per-project files, install the plugin once. The commands are the same in the
+[`/plugin`](https://code.claude.com/docs/en/plugins/install) UI:
 
 ```text
 /plugin marketplace add Diffra/autoremediator

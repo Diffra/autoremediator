@@ -61,6 +61,7 @@ organized by what you are trying to do.
 - [Contributing guide](../CONTRIBUTING.md)
 - [Code quality audit](contributing/code-quality-audit.md): measured baseline of structure, style and duplication (draft)
 - [Target structure](contributing/target-structure.md): proposed feature-folder layout for `packages/core` (draft)
+- [Distribution](contributing/distribution.md): where the plugin, package and MCP server are listed, and how an agent or person finds them
 - [Benchmark](contributing/benchmark.md): tasks, modes, scoring, adding a task
 - [Architecture](contributing/architecture.md)
 - [Security policy](../.github/SECURITY.md)

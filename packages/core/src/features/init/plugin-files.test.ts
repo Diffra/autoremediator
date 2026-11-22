@@ -6,10 +6,11 @@ import { describe, expect, it } from "vitest";
 
 import { getOperation } from "../../surfaces/catalog/index.js";
 import { INSTRUCTED_TOOLS } from "./assets.js";
-import { claudeCodePluginFiles } from "./plugin-files.js";
+import { claudeCodePluginFiles, MCP_REGISTRY_NAME, mcpRegistryFiles } from "./plugin-files.js";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "..", "..");
-const files = claudeCodePluginFiles();
+const pluginFiles = claudeCodePluginFiles();
+const files = { ...pluginFiles, ...mcpRegistryFiles() };
 
 describe("Claude Code plugin files", () => {
   it.runIf(process.env.UPDATE_PLUGINS === "1")("rewrites the files on disk", () => {
@@ -68,10 +69,27 @@ describe("Claude Code plugin files", () => {
   it("names only tools that exist", () => {
     for (const tool of INSTRUCTED_TOOLS) expect(getOperation(tool)).toBeDefined();
     const referenced = new Set<string>();
-    for (const content of Object.values(files)) {
+    for (const content of Object.values(pluginFiles)) {
       for (const [, word] of content.matchAll(/`([a-z][A-Za-z]+)`/g))
         if (word && getOperation(word)) referenced.add(word);
     }
     for (const word of referenced) expect(INSTRUCTED_TOOLS as readonly string[]).toContain(word);
+  });
+
+  it("keeps the registry entry in step with the package", () => {
+    const pkg = JSON.parse(readFileSync(join(root, "packages/core/package.json"), "utf8")) as {
+      name: string;
+      version: string;
+      mcpName?: string;
+    };
+    const entry = JSON.parse(files["server.json"]!) as {
+      name: string;
+      version: string;
+      packages: Array<{ identifier: string; version: string }>;
+    };
+    expect(pkg.mcpName).toBe(MCP_REGISTRY_NAME);
+    expect(entry.name).toBe(pkg.mcpName);
+    expect(entry.version).toBe(pkg.version);
+    expect(entry.packages[0]).toMatchObject({ identifier: pkg.name, version: pkg.version });
   });
 });

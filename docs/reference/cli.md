@@ -39,6 +39,7 @@ options typed after a subcommand apply to it. Unknown options are an error.
 | `patches list \| inspect <path> \| validate <path> \| reconcile` | Manage generated patches. `reconcile --auto-apply` removes patches an upstream release has made obsolete |
 | `reachability` | Is a package or symbol imported by project source (`--package`, `--symbol`); `--trace-file <path>` adds [runtime evidence](../guides/runtime-reachability.md) |
 | `guard [package...]` | Judge packages before installing them ([details](../guides/guard.md)); takes `--min-age-hours`, `--offline`, `--output-format`, and `--git-diff` (check dependencies added or changed in `package.json` since `--base <ref>`, default `HEAD`; a branch is compared at the merge base; `--include-transitive` adds packages only the lockfile gained, and the package list is then optional). Exits `0` clear, `3` check first, `4` blocked |
+| `mcp` | Start the MCP server on stdio (`--http` for streamable HTTP on 127.0.0.1). The same server as the `autoremediator-mcp` binary, reachable as `npx autoremediator mcp` |
 | `guard-hook` | Agent pre-command hook: reads the hook JSON on stdin, answers allow, ask or deny for package installs. `--host claude-code\|cursor\|copilot` (default `claude-code`) picks the output format |
 | `evaluate <package[@version]>` | Pre-install check (`--pkg-version`) |
 

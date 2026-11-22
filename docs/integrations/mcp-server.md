@@ -13,6 +13,9 @@
 }
 ```
 
+`npx -y autoremediator mcp` starts the same server, so a client that launches a package by name
+works too. The server is listed in the official MCP registry as `io.github.Diffra/autoremediator`.
+
 ## Tools
 
 Tool names match the [SDK functions](../reference/sdk.md#functions), and arguments match the SDK
