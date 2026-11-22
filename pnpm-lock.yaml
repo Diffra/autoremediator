@@ -259,8 +259,8 @@ importers:
         version: 4.6.7
     devDependencies:
       '@ai-sdk/anthropic':
-        specifier: ^4.0.104
-        version: 4.0.104(zod@4.6.7)
+        specifier: ^4.0.105
+        version: 4.0.105(zod@4.6.7)
       '@ai-sdk/openai':
         specifier: ^4.0.117
         version: 4.0.117(zod@4.6.7)
@@ -334,8 +334,8 @@ importers:
 
 packages:
 
-  '@ai-sdk/anthropic@4.0.104':
-    resolution: {integrity: sha512-8Es3QS7oeNH72O5LbeZMS+AP0Jf7bYJR80GgrOEZ0yGA6A4hnJ+QgFiIeUrzqSiVlqDTTNCk73NxXW2iwqSQuQ==}
+  '@ai-sdk/anthropic@4.0.105':
+    resolution: {integrity: sha512-i6kmv6y+FGTBxOPtLRrb5I+92WcFFGubhd33CD0JeaSyFOnLJ8my4a9olkAgyR9fACHMzxFBmoEHd0uO4i72bA==}
     engines: {node: '>=22'}
     peerDependencies:
       zod: ^3.25.76 || ^4.1.8
@@ -1542,6 +1542,7 @@ packages:
   '@typespec/ts-http-runtime@0.3.10':
     resolution: {integrity: sha512-vddvvtZ7sejSlCv+OIkn2ztjB1O31Fc2JsxI/YK725r3elXXlF/J3o3lbXJFRhoeWRWK1tjdZ+GTi6Fdtrp+EA==}
     engines: {node: '>=22.0.0'}
+    deprecated: A newer version 0.3.11 has been published.
 
   '@vercel/oidc@3.2.0':
     resolution: {integrity: sha512-UycprH3T6n3jH0k44NHMa7pnFHGu/N05MjojYr+Mc6I7obkoLIJujSWwin1pCvdy/eOxrI/l3uDLQsmcrOb4ug==}
@@ -2670,7 +2671,7 @@ packages:
 
 snapshots:
 
-  '@ai-sdk/anthropic@4.0.104(zod@4.6.7)':
+  '@ai-sdk/anthropic@4.0.105(zod@4.6.7)':
     dependencies:
       '@ai-sdk/provider': 4.0.38
       '@ai-sdk/provider-utils': 5.0.81(zod@4.6.7)
