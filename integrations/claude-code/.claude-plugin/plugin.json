@@ -1,7 +1,7 @@
 {
   "name": "autoremediator",
   "displayName": "Autoremediator",
-  "version": "0.24.0",
+  "version": "0.25.0",
   "description": "Fix vulnerable npm dependencies from a CVE or GHSA id or an audit: plans the smallest safe upgrade or override, repairs code the upgrade breaks, verifies it, rolls back on failure. Also checks a package before you install it.",
   "author": {
     "name": "Rawlings",

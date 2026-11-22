@@ -1,6 +1,6 @@
 {
   "name": "autoremediator",
-  "version": "0.24.0",
+  "version": "0.25.0",
   "private": false,
   "description": "Fix vulnerable npm dependencies from a CVE or GHSA id, an audit or a SARIF report: the smallest safe upgrade or override, agent repair of code the upgrade breaks, verified and rolled back on failure. CLI, MCP server, SDK, GitHub Action.",
   "keywords": [

@@ -1,5 +1,12 @@
 # autoremediator-bench
 
+## 0.0.4
+
+### Patch Changes
+
+- Updated dependencies [72b3836]
+  - autoremediator@0.25.0
+
 ## 0.0.3
 
 ### Patch Changes
