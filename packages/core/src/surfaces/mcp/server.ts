@@ -162,7 +162,8 @@ export function createMcpServer(options: McpServerOptions = {}): Server {
 // Start
 // ---------------------------------------------------------------------------
 
-async function startMcpServer(): Promise<void> {
+/** Starts the server on stdio, or on HTTP when `--http` is in the arguments. */
+export async function startMcpServer(): Promise<void> {
   if (process.argv.includes("--http")) {
     // Not awaited: `http.js` imports this module, so waiting for it here while this module is still
     // evaluating would deadlock. The listening server keeps the process alive.

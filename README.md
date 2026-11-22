@@ -54,6 +54,23 @@ You get one line per package showing what was fixed and what wasn't, plus an evi
 what was checked and decided. Already have a specific advisory in mind? Pass its CVE or GHSA id
 instead of `--audit`.
 
+### From your coding agent
+
+Claude Code, Cursor, Codex, Copilot and Gemini CLI can run it through its MCP server, and the agent
+proposes while the [verifier](docs/guides/plan-and-apply.md#verify) decides.
+
+```text
+/plugin marketplace add Diffra/autoremediator       # Claude Code: tools, skills, install guard
+/plugin install autoremediator@autoremediator
+```
+
+```bash
+npx autoremediator init                              # any agent: writes the config for the hosts it finds
+claude mcp add autoremediator -- npx -y autoremediator mcp   # or just the MCP server, by hand
+```
+
+See [Coding agents](docs/integrations/coding-agents.md) for what each one gets.
+
 ## What happens to each vulnerable package
 
 | Situation                       | What Autoremediator does                                              |

@@ -145,7 +145,7 @@ route lists in the Mode 4 and Mode 5 entries).
 
 ### Mode 4: MCP Tool Server
 
-- Trigger: `autoremediator-mcp` (stdio), or `autoremediator-mcp --http` (stateless streamable HTTP on `127.0.0.1`, role-gated; see `docs/integrations/mcp-server.md`)
+- Trigger: `autoremediator-mcp` (stdio) or `autoremediator mcp` (the same server, for clients that launch a package by name), or `autoremediator-mcp --http` (stateless streamable HTTP on `127.0.0.1`, role-gated; see `docs/integrations/mcp-server.md`)
 - Behavior: exposes every operation in the catalog (`packages/core/src/surfaces/catalog`) as an MCP tool, generated from one definition shared with the HTTP server
 - Source: `packages/core/src/surfaces/catalog/`, `packages/core/src/surfaces/mcp/` (server, resources, prompts, HTTP transport)
 - Exposed MCP tools: `health`, `remediate`, `planRemediation`, `remediateFromScan`, `remediatePortfolio`, `listPatchArtifacts`, `inspectPatchArtifact`, `validatePatchArtifact`, `reconcilePatchArtifacts`, `applyPlan`, `resumeRun`, `rollbackRun`, `verifyRun`, `startAttempt`, `proposePatch`, `verifyAttempt`, `finalizeAttempt`, `abandonAttempt`, `getRun`, `listRuns`, `updateOutdated`, `toVex`, `submitRemediateJob`, `submitScanJob`, `submitPortfolioJob`, `pollJob`, `checkReachability`, `evaluatePackage`, `guardPackage`, `getAutonomy`, `analyzeDependencies`, `scanDelta`, `listRecipes`, `applyRecipe`, `assessUpgrade`, `findVulnerableSymbols`, `incident`, `premortem`, `compilePolicy`, `explainPolicy`, `readMaintainerVex`, `generateProofOfFix`, `radar`, `freshnessReport`, `planFreshnessStep`, `listMemory`, `buildEvidencePack`

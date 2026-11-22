@@ -17,6 +17,7 @@ import { registerHookCommands } from "./commands/hooks.js";
 import { registerIncidentCommands } from "./commands/incident.js";
 import { registerInitCommand } from "./commands/init.js";
 import { registerMaintainCommands } from "./commands/maintain.js";
+import { registerMcpCommand } from "./commands/mcp.js";
 import { registerMemoryCommands } from "./commands/memory.js";
 import { registerPatchesCommands } from "./commands/patches.js";
 import { registerPolicyCommands } from "./commands/policy.js";
@@ -45,6 +46,7 @@ export function createProgram(): Command {
   registerGuardCommand(program);
   registerDietCommand(program);
   registerGuardHookCommand(program);
+  registerMcpCommand(program);
   registerIncidentCommands(program);
   registerPolicyCommands(program);
   registerMaintainCommands(program);
