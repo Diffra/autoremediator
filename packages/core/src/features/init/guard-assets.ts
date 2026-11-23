@@ -69,7 +69,8 @@ export function copilotGuardHookEntry(
  * Sources: https://pnpm.io/pnpmfile (readPackage, async support, load location).
  */
 export function pnpmfileGuardContent(range: string = `^${PACKAGE_VERSION}`): string {
-  return String.raw`// ${PNPMFILE_MARKER}. Before pnpm resolves the project, this checks the
+  return (
+    String.raw`// ${PNPMFILE_MARKER}. Before pnpm resolves the project, this checks the
 // dependencies that are not yet in pnpm-lock.yaml (what "pnpm add" is adding, or what was edited into
 // package.json) with "autoremediator guard", and stops the install if one is blocked.
 // What it can and cannot see: ${DOCS_URL}/guides/guard.md
@@ -125,7 +126,12 @@ function guardArgument(name, specifier) {
   return name + '@' + specifier;
 }
 
-function check(pkg, context) {
+` + PNPMFILE_CHECK
+  );
+}
+
+/** The part of the generated pnpmfile that does the checking; it holds no interpolation. */
+const PNPMFILE_CHECK = String.raw`function check(pkg, context) {
   const lockfile = read('pnpm-lock.yaml');
   if (lockfile === undefined) {
     context.log('autoremediator guard: no pnpm-lock.yaml to compare with, so nothing was checked. Run: npx autoremediator guard --git-diff');
@@ -179,4 +185,3 @@ module.exports = {
   },
 };
 `;
-}

@@ -288,51 +288,7 @@ async function sendMessage(
     throw error;
   }
 
-  const base = {
-    id: randomUUID(),
-    contextId: message.contextId ?? randomUUID(),
-    history: [message],
-    metadata: { operation: operation.name },
-  };
-  const timestamp = new Date().toISOString();
-  let task: A2aTask;
-  try {
-    const result = await operation.handler(confined, {
-      api: { ...defaultApiDeps, ...deps },
-      source: "openapi",
-      operationNames: [...operations.keys()],
-    });
-    // Round-trip so the artifact holds exactly what a JSON consumer would receive.
-    const serialized = JSON.stringify(result ?? null);
-    const data: unknown = JSON.parse(serialized);
-    task = {
-      ...base,
-      status: { state: "TASK_STATE_COMPLETED", timestamp },
-      artifacts: [
-        {
-          artifactId: randomUUID(),
-          name: operation.name,
-          parts: [{ data, mediaType: JSON_MEDIA_TYPE }],
-        },
-      ],
-    };
-  } catch (error) {
-    const text = redactSecrets(errorMessage(error));
-    task = {
-      ...base,
-      status: {
-        state: "TASK_STATE_FAILED",
-        message: {
-          messageId: randomUUID(),
-          contextId: base.contextId,
-          taskId: base.id,
-          role: "ROLE_AGENT",
-          parts: [{ text }],
-        },
-        timestamp,
-      },
-    };
-  }
+  const task = await executeTask(operation, confined, message, deps, operations);
 
   rememberTask(task, role, callerIdentity(req));
   const configuration = isRecord(params["configuration"]) ? params["configuration"] : {};
@@ -428,4 +384,62 @@ export async function handleA2aRequest(
       );
     }
   }
+}
+
+type ParsedMessage = Exclude<ReturnType<typeof parseMessage>, string>;
+
+/** Runs the operation and wraps its result, or its failure, as a completed or failed A2A task. */
+async function executeTask(
+  operation: Operation,
+  input: Parameters<Operation["handler"]>[0],
+  message: ParsedMessage,
+  deps: Partial<ApiDeps>,
+  operations: ReadonlyMap<string, Operation>,
+): Promise<A2aTask> {
+  const base = {
+    id: randomUUID(),
+    contextId: message.contextId ?? randomUUID(),
+    history: [message],
+    metadata: { operation: operation.name },
+  };
+  const timestamp = new Date().toISOString();
+  let task: A2aTask;
+  try {
+    const result = await operation.handler(input, {
+      api: { ...defaultApiDeps, ...deps },
+      source: "openapi",
+      operationNames: [...operations.keys()],
+    });
+    // Round-trip so the artifact holds exactly what a JSON consumer would receive.
+    const serialized = JSON.stringify(result ?? null);
+    const data: unknown = JSON.parse(serialized);
+    task = {
+      ...base,
+      status: { state: "TASK_STATE_COMPLETED", timestamp },
+      artifacts: [
+        {
+          artifactId: randomUUID(),
+          name: operation.name,
+          parts: [{ data, mediaType: JSON_MEDIA_TYPE }],
+        },
+      ],
+    };
+  } catch (error) {
+    const text = redactSecrets(errorMessage(error));
+    task = {
+      ...base,
+      status: {
+        state: "TASK_STATE_FAILED",
+        message: {
+          messageId: randomUUID(),
+          contextId: base.contextId,
+          taskId: base.id,
+          role: "ROLE_AGENT",
+          parts: [{ text }],
+        },
+        timestamp,
+      },
+    };
+  }
+  return task;
 }
