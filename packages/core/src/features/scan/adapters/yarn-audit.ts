@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 
+import { DataFormatError } from "../../../shared/errors.js";
 import type { NormalizedFinding } from "./npm-audit.js";
 
 const CVE_REGEX = /CVE-\d{4}-\d{1,7}/gi;
@@ -13,8 +14,13 @@ function normalizeSeverity(raw?: string): NormalizedFinding["severity"] {
   return "UNKNOWN";
 }
 
-export function parseYarnAuditJsonFromString(content: string): NormalizedFinding[] {
+/** `source` names where `content` came from, so a damaged report is traceable. */
+export function parseYarnAuditJsonFromString(
+  content: string,
+  source = "yarn audit output",
+): NormalizedFinding[] {
   const findings: NormalizedFinding[] = [];
+  let recognised = false;
   const seen = new Set<string>();
 
   const lines = content
@@ -42,6 +48,7 @@ export function parseYarnAuditJsonFromString(content: string): NormalizedFinding
       };
     };
 
+    if (event.type === "auditAdvisory" || event.type === "auditSummary") recognised = true;
     if (event.type !== "auditAdvisory") continue;
 
     const advisory = event.data?.advisory;
@@ -67,10 +74,15 @@ export function parseYarnAuditJsonFromString(content: string): NormalizedFinding
     }
   }
 
+  if (!recognised) {
+    throw new DataFormatError(
+      `${source} is not yarn audit output: it has no auditAdvisory or auditSummary event`,
+    );
+  }
   return findings;
 }
 
 export function parseYarnAuditJsonFile(filePath: string): NormalizedFinding[] {
   const content = readFileSync(filePath, "utf8");
-  return parseYarnAuditJsonFromString(content);
+  return parseYarnAuditJsonFromString(content, filePath);
 }

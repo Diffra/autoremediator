@@ -29,6 +29,11 @@ the npm format.
 | `yarn-audit` | `yarn audit --json` |
 | `sarif` | Any SARIF 2.1.0 producer |
 
+A file that is not in the chosen format is an error that names the file and the field, never "0
+findings": npm audit JSON needs a top-level `vulnerabilities` object, SARIF needs `runs`, and Yarn
+output needs an `auditAdvisory` or `auditSummary` record. A clean report (an empty `vulnerabilities`
+object, an empty `runs` list, or only a summary record) is still a valid report with no findings.
+
 Findings are deduplicated by id, so an advisory reported twice is fixed once. An advisory with a CVE
 id is handled under it; one with only a GHSA id is handled under the GHSA id.
 

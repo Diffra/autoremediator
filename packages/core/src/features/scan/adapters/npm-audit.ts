@@ -1,5 +1,8 @@
 import { readFileSync } from "node:fs";
 
+import { z } from "zod";
+
+import { parseJson } from "../../../shared/json.js";
 import type { CveSeverity } from "../../../shared/types.js";
 
 export interface NormalizedFinding {
@@ -9,25 +12,19 @@ export interface NormalizedFinding {
   severity?: CveSeverity;
 }
 
-interface NpmAuditVulnerability {
-  name: string;
-  via: Array<
-    | string
-    | {
-        source?: number;
-        name?: string;
-        url?: string;
-        severity?: string;
-        cwe?: string[];
-        cvss?: { score?: number };
-      }
-  >;
-  severity?: string;
-}
+const viaSchema = z.union([
+  z.string(),
+  z.object({ url: z.string().optional(), name: z.string().optional() }),
+]);
 
-interface NpmAuditReport {
-  vulnerabilities?: Record<string, NpmAuditVulnerability>;
-}
+const vulnerabilitySchema = z.object({
+  name: z.string(),
+  via: z.array(viaSchema).optional(),
+  severity: z.string().optional(),
+});
+
+/** `npm audit --json` (npm 7 and later). A file without `vulnerabilities` is not an audit report. */
+const reportSchema = z.object({ vulnerabilities: z.record(z.string(), vulnerabilitySchema) });
 
 const CVE_REGEX = /CVE-\d{4}-\d{1,7}/gi;
 const GHSA_REGEX = /GHSA-[a-z0-9]{4}-[a-z0-9]{4}-[a-z0-9]{4}/gi;
@@ -40,12 +37,16 @@ function normalizeSeverity(raw?: string): NormalizedFinding["severity"] {
   return "UNKNOWN";
 }
 
-export function parseNpmAuditJsonFromString(content: string): NormalizedFinding[] {
-  const report = JSON.parse(content) as NpmAuditReport;
+/** `source` names where `content` came from, so a damaged report is traceable. */
+export function parseNpmAuditJsonFromString(
+  content: string,
+  source = "npm audit output",
+): NormalizedFinding[] {
+  const report = parseJson(content, reportSchema, source);
   const findings: NormalizedFinding[] = [];
   const seen = new Set<string>();
 
-  for (const vuln of Object.values(report.vulnerabilities ?? {})) {
+  for (const vuln of Object.values(report.vulnerabilities)) {
     for (const viaEntry of vuln.via ?? []) {
       const text =
         typeof viaEntry === "string" ? viaEntry : `${viaEntry.url ?? ""} ${viaEntry.name ?? ""}`;
@@ -71,5 +72,5 @@ export function parseNpmAuditJsonFromString(content: string): NormalizedFinding[
 
 export function parseNpmAuditJsonFile(filePath: string): NormalizedFinding[] {
   const content = readFileSync(filePath, "utf8");
-  return parseNpmAuditJsonFromString(content);
+  return parseNpmAuditJsonFromString(content, filePath);
 }
