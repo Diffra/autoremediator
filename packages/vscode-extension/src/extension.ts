@@ -48,99 +48,11 @@ export function activate(context: vscode.ExtensionContext): void {
       new PackageCodeLensProvider(),
     ),
 
-    vscode.commands.registerCommand("autoremediator.scanWorkspace", () => {
-      for (const doc of vscode.workspace.textDocuments) {
-        if (isPackageJson(doc)) void scheduleScan(doc, true);
-      }
-    }),
-
-    vscode.commands.registerCommand("autoremediator.scanDelta", async () => {
-      const activeDoc = vscode.window.activeTextEditor?.document;
-      const cwd =
-        activeDoc && isPackageJson(activeDoc)
-          ? vscode.Uri.joinPath(vscode.Uri.file(activeDoc.fileName), "..").fsPath
-          : vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-
-      if (!cwd) {
-        void vscode.window.showWarningMessage("Autoremediator: No workspace open to scan delta.");
-        return;
-      }
-
-      try {
-        const delta = await scanGitDelta(cwd, "HEAD");
-        const icon = verdictIcon(delta.netRiskVerdict);
-        void vscode.window.showInformationMessage(`Autoremediator Delta: ${icon} ${delta.summary}`);
-      } catch (err: unknown) {
-        void vscode.window.showErrorMessage(
-          `Autoremediator delta scan failed: ${(err as Error).message}`,
-        );
-      }
-    }),
-
-    vscode.commands.registerCommand(
-      "autoremediator.checkReachability",
-      async (pkgName?: string) => {
-        const activeDoc = vscode.window.activeTextEditor?.document;
-        const cwd =
-          activeDoc && isPackageJson(activeDoc)
-            ? vscode.Uri.joinPath(vscode.Uri.file(activeDoc.fileName), "..").fsPath
-            : vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-
-        if (!cwd) {
-          void vscode.window.showWarningMessage(
-            "Autoremediator: No workspace open for reachability check.",
-          );
-          return;
-        }
-
-        const targetPkg =
-          pkgName ??
-          (await vscode.window.showInputBox({
-            prompt: "Enter package name to analyze AST call-graph reachability",
-            placeHolder: "e.g. lodash, express, semver",
-          }));
-
-        if (!targetPkg) return;
-
-        try {
-          const res = await checkPackageReachability(targetPkg, cwd);
-          void vscode.window.showInformationMessage(
-            `Reachability for ${targetPkg}: ${res.status.toUpperCase()} — ${res.reason}`,
-          );
-        } catch (err: unknown) {
-          void vscode.window.showErrorMessage(
-            `Reachability check failed: ${(err as Error).message}`,
-          );
-        }
-      },
-    ),
-
-    vscode.commands.registerCommand("autoremediator.previewPatch", (patchFilePath: string) => {
-      const uri = vscode.Uri.from({
-        scheme: PATCH_SCHEME,
-        path: patchFilePath,
-      });
-      void vscode.commands.executeCommand("vscode.open", uri, {
-        preview: true,
-        viewColumn: vscode.ViewColumn.Beside,
-      });
-    }),
-
-    vscode.commands.registerCommand("autoremediator.fixCve", (cveId: string, cwd: string) => {
-      void (async () => {
-        try {
-          const output = await applyFix(cveId, cwd);
-          void vscode.window.showInformationMessage(`Autoremediator: ${output}`);
-          // Refresh diagnostics after fix.
-          for (const doc of vscode.workspace.textDocuments) {
-            if (isPackageJson(doc)) void scheduleScan(doc, true);
-          }
-        } catch (err: unknown) {
-          const message = err instanceof Error ? err.message : String(err);
-          void vscode.window.showErrorMessage(`Autoremediator fix failed: ${message}`);
-        }
-      })();
-    }),
+    vscode.commands.registerCommand("autoremediator.scanWorkspace", rescanOpenPackageJsons),
+    vscode.commands.registerCommand("autoremediator.scanDelta", scanDeltaCommand),
+    vscode.commands.registerCommand("autoremediator.checkReachability", checkReachabilityCommand),
+    vscode.commands.registerCommand("autoremediator.previewPatch", previewPatchCommand),
+    vscode.commands.registerCommand("autoremediator.fixCve", fixCveCommand),
   );
 
   // Scan files already open when the extension activates.
@@ -357,4 +269,83 @@ function verdictIcon(verdict: string): string {
     return "⚠️";
   }
   return verdict === "improved" ? "✅" : "ℹ️";
+}
+
+function rescanOpenPackageJsons(): void {
+  for (const doc of vscode.workspace.textDocuments) {
+    if (isPackageJson(doc)) void scheduleScan(doc, true);
+  }
+}
+
+/** The folder of the open package.json, or the first workspace folder. */
+function projectRoot(): string | undefined {
+  const activeDoc = vscode.window.activeTextEditor?.document;
+  return activeDoc && isPackageJson(activeDoc)
+    ? vscode.Uri.joinPath(vscode.Uri.file(activeDoc.fileName), "..").fsPath
+    : vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+}
+
+async function scanDeltaCommand(): Promise<void> {
+  const cwd = projectRoot();
+  if (!cwd) {
+    void vscode.window.showWarningMessage("Autoremediator: No workspace open to scan delta.");
+    return;
+  }
+
+  try {
+    const delta = await scanGitDelta(cwd, "HEAD");
+    const icon = verdictIcon(delta.netRiskVerdict);
+    void vscode.window.showInformationMessage(`Autoremediator Delta: ${icon} ${delta.summary}`);
+  } catch (err: unknown) {
+    void vscode.window.showErrorMessage(
+      `Autoremediator delta scan failed: ${(err as Error).message}`,
+    );
+  }
+}
+
+async function checkReachabilityCommand(pkgName?: string): Promise<void> {
+  const cwd = projectRoot();
+  if (!cwd) {
+    void vscode.window.showWarningMessage(
+      "Autoremediator: No workspace open for reachability check.",
+    );
+    return;
+  }
+
+  const targetPkg =
+    pkgName ??
+    (await vscode.window.showInputBox({
+      prompt: "Enter package name to analyze AST call-graph reachability",
+      placeHolder: "e.g. lodash, express, semver",
+    }));
+  if (!targetPkg) return;
+
+  try {
+    const res = await checkPackageReachability(targetPkg, cwd);
+    void vscode.window.showInformationMessage(
+      `Reachability for ${targetPkg}: ${res.status.toUpperCase()} — ${res.reason}`,
+    );
+  } catch (err: unknown) {
+    void vscode.window.showErrorMessage(`Reachability check failed: ${(err as Error).message}`);
+  }
+}
+
+function previewPatchCommand(patchFilePath: string): void {
+  const uri = vscode.Uri.from({ scheme: PATCH_SCHEME, path: patchFilePath });
+  void vscode.commands.executeCommand("vscode.open", uri, {
+    preview: true,
+    viewColumn: vscode.ViewColumn.Beside,
+  });
+}
+
+async function fixCveCommand(cveId: string, cwd: string): Promise<void> {
+  try {
+    const output = await applyFix(cveId, cwd);
+    void vscode.window.showInformationMessage(`Autoremediator: ${output}`);
+    // Refresh diagnostics after fix.
+    rescanOpenPackageJsons();
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    void vscode.window.showErrorMessage(`Autoremediator fix failed: ${message}`);
+  }
 }

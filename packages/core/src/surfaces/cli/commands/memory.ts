@@ -122,6 +122,14 @@ export function registerMemoryCommands(program: Command): void {
       "Remediation memory (.autoremediator/memory.md): what this repository has learned between runs, as short validated entries a person can review and edit",
     );
 
+  addListCommand(memory);
+  addAddCommand(memory);
+  addRemoveCommand(memory);
+  addAcceptCommand(memory);
+  addPruneCommand(memory);
+}
+
+function addListCommand(memory: Command): void {
   common(
     memory
       .command("list")
@@ -158,7 +166,9 @@ export function registerMemoryCommands(program: Command): void {
     }
     for (const problem of listing.problems) out(`  problem: ${problem}`);
   });
+}
 
+function addAddCommand(memory: Command): void {
   common(
     memory
       .command("add <kind> <value>")
@@ -191,7 +201,9 @@ export function registerMemoryCommands(program: Command): void {
     );
     for (const id of report.evicted) out(`Made room by dropping ${id}.`);
   });
+}
 
+function addRemoveCommand(memory: Command): void {
   common(memory.command("remove <id>").description("Delete an entry")).action(
     async (id: string, opts: MemoryCliOptions) => {
       validateOutputFormat(opts.outputFormat, ["text", "json"], "memory remove");
@@ -200,7 +212,9 @@ export function registerMemoryCommands(program: Command): void {
       else out(`Removed ${removed.id}: ${describeEntry(removed)}`);
     },
   );
+}
 
+function addAcceptCommand(memory: Command): void {
   common(
     memory
       .command("accept <id>")
@@ -217,7 +231,9 @@ export function registerMemoryCommands(program: Command): void {
       );
     }
   });
+}
 
+function addPruneCommand(memory: Command): void {
   common(memory.command("prune").description("Remove expired entries")).action(
     async (opts: MemoryCliOptions) => {
       validateOutputFormat(opts.outputFormat, ["text", "json"], "memory prune");

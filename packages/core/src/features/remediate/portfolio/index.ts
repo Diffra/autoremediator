@@ -67,72 +67,16 @@ export async function remediatePortfolio(
   let failedCount = 0;
 
   for (const executionTarget of executionTargets) {
-    const target = executionTarget.target;
     const threatRank = options.campaignMode === true ? executionTarget.rank : undefined;
-    const { cveId, inputPath, audit } = normalizeTargetInput(target);
-
-    try {
-      if (cveId) {
-        const remediationReport = await remediate(cveId, {
-          ...options,
-          cwd: target.cwd,
-          source: options.source,
-        });
-
-        const status = toTargetStatusFromRemediation(remediationReport);
-        results.push({
-          target,
-          status,
-          ...(threatRank !== undefined ? { threatRank } : {}),
-          remediationReport,
-          changeRequests: remediationReport.changeRequests,
-        });
-
-        if (remediationReport.changeRequests?.length) {
-          changeRequests.push(...remediationReport.changeRequests);
-        }
-
-        if (status === "failed") {
-          failedCount += 1;
-        } else {
-          successCount += 1;
-        }
-        continue;
-      }
-
-      const scanReport = await remediateFromScan(inputPath ?? "", {
-        ...options,
-        cwd: target.cwd,
-        audit,
-        format: target.format,
-        source: options.source,
-      });
-
-      results.push({
-        target,
-        status: scanReport.status,
-        ...(threatRank !== undefined ? { threatRank } : {}),
-        scanReport,
-        changeRequests: scanReport.changeRequests,
-      });
-
-      if (scanReport.changeRequests?.length) {
-        changeRequests.push(...scanReport.changeRequests);
-      }
-
-      if (scanReport.status === "failed") {
-        failedCount += 1;
-      } else {
-        successCount += 1;
-      }
-    } catch (error) {
-      results.push({
-        target,
-        status: "failed",
-        ...(threatRank !== undefined ? { threatRank } : {}),
-        error: errorMessage(error),
-      });
+    const result = await runPortfolioTarget(executionTarget.target, threatRank, options);
+    results.push(result);
+    if (result.changeRequests?.length) {
+      changeRequests.push(...result.changeRequests);
+    }
+    if (result.status === "failed") {
       failedCount += 1;
+    } else {
+      successCount += 1;
     }
   }
 
@@ -161,4 +105,48 @@ function overallStatusOf(failedCount: number, successCount: number): "ok" | "par
     return "ok";
   }
   return successCount > 0 ? "partial" : "failed";
+}
+
+/** Remediates one portfolio target; a failure becomes a failed result rather than aborting the rest. */
+async function runPortfolioTarget(
+  target: PortfolioTarget,
+  threatRank: number | undefined,
+  options: RemediateOptions,
+): Promise<PortfolioTargetResult> {
+  const { cveId, inputPath, audit } = normalizeTargetInput(target);
+  const rank = threatRank === undefined ? {} : { threatRank };
+
+  try {
+    if (cveId) {
+      const remediationReport = await remediate(cveId, {
+        ...options,
+        cwd: target.cwd,
+        source: options.source,
+      });
+      return {
+        target,
+        status: toTargetStatusFromRemediation(remediationReport),
+        ...rank,
+        remediationReport,
+        changeRequests: remediationReport.changeRequests,
+      };
+    }
+
+    const scanReport = await remediateFromScan(inputPath ?? "", {
+      ...options,
+      cwd: target.cwd,
+      audit,
+      format: target.format,
+      source: options.source,
+    });
+    return {
+      target,
+      status: scanReport.status,
+      ...rank,
+      scanReport,
+      changeRequests: scanReport.changeRequests,
+    };
+  } catch (error) {
+    return { target, status: "failed", ...rank, error: errorMessage(error) };
+  }
 }

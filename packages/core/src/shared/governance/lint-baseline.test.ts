@@ -13,7 +13,7 @@ const root = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "..
 
 const CAPS: Record<string, number> = {
   "eslint/max-lines": 28,
-  "eslint/max-lines-per-function": 69,
+  "eslint/max-lines-per-function": 63,
 };
 
 interface Override {
