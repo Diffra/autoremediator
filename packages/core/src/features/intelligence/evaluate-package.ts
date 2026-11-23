@@ -8,6 +8,8 @@
 import semver from "semver";
 
 import { loadRegistryConfig } from "../../infra/http/registry-config.js";
+import { UpstreamError, errorMessage } from "../../shared/errors.js";
+import { assertValidPackageName } from "../../shared/package-name.js";
 import { fetchCisaKevFeed, findKevEntry } from "./sources/cisa-kev.js";
 import { fetchEpss } from "./sources/epss.js";
 import { queryOsvPackage, parseOsvVuln } from "./sources/osv.js";
@@ -22,6 +24,7 @@ export async function evaluatePackage(
   packageName: string,
   options: EvaluatePackageOptions = {},
 ): Promise<PackageEvaluationReport> {
+  assertValidPackageName(packageName);
   const version = options.version?.trim();
   const enrich = options.enrichIntelligence !== false;
 
@@ -41,12 +44,7 @@ export async function evaluatePackage(
     // Registry lookup failure shouldn't abort OSV checks
   }
 
-  let rawVulns: Awaited<ReturnType<typeof queryOsvPackage>> = [];
-  try {
-    rawVulns = await queryOsvPackage(packageName, version);
-  } catch {
-    rawVulns = [];
-  }
+  const rawVulns = await queryAdvisories(packageName, version);
 
   // Load CISA KEV feed if enrichment is enabled
   let kevFeed: Awaited<ReturnType<typeof fetchCisaKevFeed>> | null = null;
@@ -170,4 +168,22 @@ export async function evaluatePackage(
     latestVersion,
     generatedAt: new Date().toISOString(),
   };
+}
+
+/**
+ * The advisories OSV holds for the package. A failed lookup is an error, never an empty list:
+ * "no advisories" and "could not ask" must not both read as safe.
+ */
+async function queryAdvisories(
+  packageName: string,
+  version: string | undefined,
+): Promise<Awaited<ReturnType<typeof queryOsvPackage>>> {
+  try {
+    return await queryOsvPackage(packageName, version);
+  } catch (error) {
+    throw new UpstreamError(
+      `Could not check OSV for known vulnerabilities in "${packageName}": ${errorMessage(error)}. The package was not judged.`,
+      { cause: error },
+    );
+  }
 }
