@@ -49,6 +49,10 @@ autoremediator diff --base origin/main --ci
 It compares the dependency manifests at the base and in the working tree, and reports
 vulnerabilities in the added or upgraded packages.
 
+A changed lockfile that cannot be read (a merge conflict left in `package-lock.json`, invalid YAML in
+`pnpm-lock.yaml`) stops the scan with an error that names the file. It is never read as "no
+dependencies", which would make every package look added or removed.
+
 ## Interactive triage
 
 ```bash
