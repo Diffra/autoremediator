@@ -72,9 +72,46 @@ function windowLines(window: VersionWindow): string[] {
 /** The incident report as markdown, safe to commit or paste into a ticket. */
 export function renderIncidentMarkdown(report: IncidentReport): string {
   const out: string[] = [];
-  const { target, exposure } = report;
-  const out_ = (...lines: string[]): void => void out.push(...lines);
+  const emit: Emit = (...lines) => void out.push(...lines);
 
+  describeTarget(report, emit);
+  const everPresent = report.history?.packages.some((entry) => entry.windows.length > 0) ?? false;
+  emit("## Summary", "");
+  emit(exposureLine(report.exposure.exposed, everPresent), "");
+
+  exposureSection(report, emit);
+  historySection(report, emit);
+  rollbackSection(report, emit);
+  rotationSection(report, emit);
+
+  if (report.notes.length > 0) {
+    emit("## Notes", "");
+    for (const note of report.notes) emit(`- ${prose(note)}`);
+    emit("");
+  }
+  return `${out.join("\n").trimEnd()}\n`;
+}
+
+function installScriptLabel(value: boolean | "unknown"): string {
+  if (value === "unknown") {
+    return "unknown";
+  }
+  return value ? "**yes**" : "no";
+}
+
+function exposureLine(exposed: boolean, everPresent: boolean): string {
+  if (exposed) {
+    return "- **An affected version is locked or installed in this project now.**";
+  }
+  return everPresent
+    ? "- No affected version is locked now, but one was in this repository's history (see History)."
+    : "- No affected version is locked here, and none was found in the lockfile history that was read.";
+}
+
+type Emit = (...lines: string[]) => void;
+
+function describeTarget(report: IncidentReport, out_: Emit): void {
+  const { target } = report;
   out_(
     `# Incident report: ${code(target.input.length > 120 ? `${target.input.slice(0, 117)}...` : target.input)}`,
     "",
@@ -91,11 +128,10 @@ export function renderIncidentMarkdown(report: IncidentReport): string {
       target.affected.map((entry) => `${code(entry.name)} ${code(entry.range)}`).join("; "),
     "",
   );
+}
 
-  const everPresent = report.history?.packages.some((entry) => entry.windows.length > 0) ?? false;
-  out_("## Summary", "");
-  out_(exposureLine(exposure.exposed, everPresent), "");
-
+function exposureSection(report: IncidentReport, out_: Emit): void {
+  const { exposure } = report;
   out_("## 1. Exposure now", "");
   const anyOccurrence = exposure.packages.some((entry) => entry.occurrences.length > 0);
   if (anyOccurrence) {
@@ -124,7 +160,9 @@ export function renderIncidentMarkdown(report: IncidentReport): string {
   }
   for (const note of exposure.notes) out_(`- ${prose(note)}`);
   out_("");
+}
 
+function historySection(report: IncidentReport, out_: Emit): void {
   out_("## 2. History", "");
   if (!report.history) {
     out_("History was not read (turned off).", "");
@@ -161,7 +199,9 @@ export function renderIncidentMarkdown(report: IncidentReport): string {
     }
     out_("");
   }
+}
 
+function rollbackSection(report: IncidentReport, out_: Emit): void {
   out_("## 3. Roll back to the last safe version", "");
   if (report.rollback.proposals.length === 0) {
     out_("Nothing to roll back: no affected version is locked.", "");
@@ -204,7 +244,9 @@ export function renderIncidentMarkdown(report: IncidentReport): string {
   }
   for (const note of report.rollback.notes) out_(`- ${prose(note)}`);
   if (report.rollback.notes.length > 0) out_("");
+}
 
+function rotationSection(report: IncidentReport, out_: Emit): void {
   if (report.secrets) {
     const secrets = report.secrets;
     out_("## 4. Rotation checklist", "", `> ${secrets.disclaimer}`, "");
@@ -256,27 +298,4 @@ export function renderIncidentMarkdown(report: IncidentReport): string {
       "",
     );
   }
-
-  if (report.notes.length > 0) {
-    out_("## Notes", "");
-    for (const note of report.notes) out_(`- ${prose(note)}`);
-    out_("");
-  }
-  return `${out.join("\n").trimEnd()}\n`;
-}
-
-function installScriptLabel(value: boolean | "unknown"): string {
-  if (value === "unknown") {
-    return "unknown";
-  }
-  return value ? "**yes**" : "no";
-}
-
-function exposureLine(exposed: boolean, everPresent: boolean): string {
-  if (exposed) {
-    return "- **An affected version is locked or installed in this project now.**";
-  }
-  return everPresent
-    ? "- No affected version is locked now, but one was in this repository's history (see History)."
-    : "- No affected version is locked here, and none was found in the lockfile history that was read.";
 }

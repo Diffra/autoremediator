@@ -48,18 +48,9 @@ export async function runInteractiveTriage(
 
   outStream.write("\n🔍 Scanning for security findings to triage...\n");
 
-  let findings = [];
+  let findings: Findings = [];
   try {
-    if (inputPath && typeof inputPath === "string") {
-      findings = parseScanInput(inputPath, opts.format ?? "auto");
-    } else {
-      findings = await parseScanInputFromAudit({
-        cwd,
-        packageManager: opts.packageManager,
-        format: opts.format ?? "auto",
-        workspace: opts.workspace,
-      });
-    }
+    findings = await loadFindings(inputPath, opts, cwd);
   } catch (err) {
     outStream.write(`Failed to load scan findings: ${errorMessage(err)}\n`);
     return;
@@ -73,150 +64,211 @@ export async function runInteractiveTriage(
 
   outStream.write(`Found ${cveIds.length} unique vulnerability(ies) to triage.\n`);
 
-  const rl =
-    opts.rl ??
-    readline.createInterface({
-      input: inStream,
-      output: outStream,
-    });
-
-  let remediatedCount = 0;
-  let skippedCount = 0;
-  let suppressedCount = 0;
+  const rl = opts.rl ?? readline.createInterface({ input: inStream, output: outStream });
+  const context: TriageContext = {
+    cwd,
+    opts,
+    out: outStream,
+    rl,
+    tally: { remediated: 0, skipped: 0, suppressed: 0 },
+  };
 
   try {
-    for (let i = 0; i < cveIds.length; i++) {
-      const cveId = cveIds[i]!;
-      const firstFinding = findings.find((f) => f.cveId.toUpperCase() === cveId.toUpperCase());
-      const pkgName = firstFinding?.packageName ?? "unknown package";
-      const severity = firstFinding?.severity ?? "UNKNOWN";
-
-      let safeVersion: string | undefined;
-      if (pkgName !== "unknown package") {
-        try {
-          const evalRes = await evaluatePackage(pkgName, { enrichIntelligence: true });
-          const matchingVuln = evalRes.vulnerabilities.find(
-            (v) => v.cveId.toUpperCase() === cveId.toUpperCase(),
-          );
-          safeVersion =
-            matchingVuln?.safeUpgradeVersion ??
-            evalRes.vulnerabilities.find((v) => v.safeUpgradeVersion)?.safeUpgradeVersion;
-        } catch {
-          // ignore evaluation error
-        }
-      }
-
-      outStream.write("\n" + "=".repeat(60) + "\n");
-      outStream.write(`[${i + 1}/${cveIds.length}] Vulnerability: ${cveId}\n`);
-      outStream.write(`  Package:  ${pkgName}\n`);
-      outStream.write(`  Severity: ${severity}\n`);
-      if (safeVersion) {
-        outStream.write(`  Safe Upstream Version: ${safeVersion}\n`);
-      }
-      outStream.write("=".repeat(60) + "\n");
-
-      let answered = false;
-      while (!answered) {
-        const answer = await rl.question(
-          "Action: [a]pply fix, [s]kip, [x] suppress/vex, [q]uit triage? [a/s/x/q]: ",
-        );
-        const choice = answer.trim().toLowerCase();
-
-        if (choice === "a" || choice === "apply") {
-          outStream.write(`Applying remediation for ${cveId}...\n`);
-          try {
-            const report = await remediate(cveId, {
-              cwd,
-              packageManager: opts.packageManager,
-              patchesDir: opts.patchesDir,
-              policy: opts.policy,
-              runTests: opts.runTests,
-              constraints: {
-                directDependenciesOnly: opts.directDependenciesOnly,
-                preferVersionBump: opts.preferVersionBump,
-                workspace: opts.workspace,
-              },
-            });
-            const applied = report.results.some((r) => r.applied);
-            if (applied) {
-              outStream.write(`✅ Successfully applied remediation for ${cveId}!\n`);
-              remediatedCount++;
-            } else {
-              const reason = report.results[0]?.unresolvedReason ?? "unresolved";
-              outStream.write(`⚠️ Remediation could not be applied automatically (${reason}).\n`);
-              skippedCount++;
-            }
-          } catch (err) {
-            outStream.write(`❌ Error remediating ${cveId}: ${errorMessage(err)}\n`);
-            skippedCount++;
-          }
-          answered = true;
-        } else if (choice === "s" || choice === "skip" || choice === "") {
-          outStream.write(`Skipped ${cveId}.\n`);
-          skippedCount++;
-          answered = true;
-        } else if (choice === "x" || choice === "suppress") {
-          outStream.write(`Configuring suppression / VEX record for ${cveId}...\n`);
-
-          const justAnswer = await rl.question(
-            "Justification: [1] not_affected (default), [2] mitigated, [3] under_investigation, [4] fixed: ",
-          );
-          const justChoice = justAnswer.trim().toLowerCase();
-
-          let justification: VexJustification = "not_affected";
-          if (justChoice === "2" || justChoice === "mitigated") {
-            justification = "mitigated";
-          } else if (justChoice === "3" || justChoice === "under_investigation") {
-            justification = "under_investigation";
-          } else if (justChoice === "4" || justChoice === "fixed") {
-            justification = "fixed";
-          } else {
-            justification = "not_affected";
-          }
-
-          const notesAnswer = await rl.question(
-            "Notes/rationale for suppression (optional, press Enter to skip): ",
-          );
-          const notes = notesAnswer.trim() || undefined;
-
-          const suppression: VexSuppression = {
-            cveId,
-            justification,
-            notes,
-          };
-
-          let persistedTarget = "";
-          if (opts.suppressionsFile) {
-            saveSuppressionToFile(opts.suppressionsFile, suppression);
-            persistedTarget = opts.suppressionsFile;
-          } else {
-            persistedTarget = saveSuppressionToPolicy(cwd, suppression, opts.policy);
-          }
-
-          if (opts.vexOut) {
-            saveSuppressionToVexDocument(opts.vexOut, suppression);
-            outStream.write(`  📄 Saved VEX statement to: ${opts.vexOut}\n`);
-          }
-
-          outStream.write(`✅ Persisted suppression for ${cveId} to ${persistedTarget}\n`);
-          suppressedCount++;
-          answered = true;
-        } else if (choice === "q" || choice === "quit") {
-          outStream.write("Exiting triage session.\n");
-          return;
-        } else {
-          outStream.write("Invalid option. Please choose 'a', 's', 'x', or 'q'.\n");
-        }
-      }
+    for (const [index, cveId] of cveIds.entries()) {
+      const finding = findings.find((f) => f.cveId.toUpperCase() === cveId.toUpperCase());
+      const pkgName = finding?.packageName ?? "unknown package";
+      const safeVersion =
+        pkgName === "unknown package" ? undefined : await lookupSafeVersion(pkgName, cveId);
+      describeFinding(outStream, {
+        position: `${index + 1}/${cveIds.length}`,
+        cveId,
+        pkgName,
+        severity: finding?.severity ?? "UNKNOWN",
+        safeVersion,
+      });
+      if ((await chooseAction(context, cveId)) === "quit") return;
     }
   } finally {
     rl.close();
-    outStream.write("\n=== Triage Summary ===\n");
-    outStream.write(`Total evaluated: ${cveIds.length}\n`);
-    outStream.write(`Remediated:     ${remediatedCount}\n`);
-    outStream.write(`Suppressed:     ${suppressedCount}\n`);
-    outStream.write(`Skipped:        ${skippedCount}\n\n`);
+    printSummary(outStream, cveIds.length, context.tally);
   }
+}
+
+type Findings = ReturnType<typeof parseScanInput>;
+
+interface Tally {
+  remediated: number;
+  skipped: number;
+  suppressed: number;
+}
+
+interface TriageContext {
+  cwd: string;
+  opts: Partial<InteractiveTriageOptions>;
+  out: NodeJS.WritableStream;
+  rl: readline.Interface;
+  tally: Tally;
+}
+
+function loadFindings(
+  inputPath: string | undefined,
+  opts: Partial<InteractiveTriageOptions>,
+  cwd: string,
+): Promise<Findings> {
+  const format = opts.format ?? "auto";
+  if (inputPath) {
+    return Promise.resolve(parseScanInput(inputPath, format));
+  }
+  return parseScanInputFromAudit({
+    cwd,
+    packageManager: opts.packageManager,
+    format,
+    workspace: opts.workspace,
+  });
+}
+
+/** The version that fixes the finding, when a lookup can name one. A failed lookup only means none is shown. */
+async function lookupSafeVersion(pkgName: string, cveId: string): Promise<string | undefined> {
+  try {
+    const evalRes = await evaluatePackage(pkgName, { enrichIntelligence: true });
+    const matchingVuln = evalRes.vulnerabilities.find(
+      (v) => v.cveId.toUpperCase() === cveId.toUpperCase(),
+    );
+    return (
+      matchingVuln?.safeUpgradeVersion ??
+      evalRes.vulnerabilities.find((v) => v.safeUpgradeVersion)?.safeUpgradeVersion
+    );
+  } catch {
+    // The lookup only decorates the prompt; triage works without it.
+    return undefined;
+  }
+}
+
+function describeFinding(
+  out: NodeJS.WritableStream,
+  finding: {
+    position: string;
+    cveId: string;
+    pkgName: string;
+    severity: string;
+    safeVersion: string | undefined;
+  },
+): void {
+  out.write("\n" + "=".repeat(60) + "\n");
+  out.write(`[${finding.position}] Vulnerability: ${finding.cveId}\n`);
+  out.write(`  Package:  ${finding.pkgName}\n`);
+  out.write(`  Severity: ${finding.severity}\n`);
+  if (finding.safeVersion) {
+    out.write(`  Safe Upstream Version: ${finding.safeVersion}\n`);
+  }
+  out.write("=".repeat(60) + "\n");
+}
+
+/** Asks until the developer picks an action; returns "quit" when they want to end the session. */
+async function chooseAction(context: TriageContext, cveId: string): Promise<"next" | "quit"> {
+  const { out, rl, tally } = context;
+  for (;;) {
+    const answer = await rl.question(
+      "Action: [a]pply fix, [s]kip, [x] suppress/vex, [q]uit triage? [a/s/x/q]: ",
+    );
+    const choice = answer.trim().toLowerCase();
+    if (choice === "a" || choice === "apply") {
+      await applyRemediation(context, cveId);
+      return "next";
+    }
+    if (choice === "s" || choice === "skip" || choice === "") {
+      out.write(`Skipped ${cveId}.\n`);
+      tally.skipped++;
+      return "next";
+    }
+    if (choice === "x" || choice === "suppress") {
+      await recordSuppression(context, cveId);
+      return "next";
+    }
+    if (choice === "q" || choice === "quit") {
+      out.write("Exiting triage session.\n");
+      return "quit";
+    }
+    out.write("Invalid option. Please choose 'a', 's', 'x', or 'q'.\n");
+  }
+}
+
+async function applyRemediation(context: TriageContext, cveId: string): Promise<void> {
+  const { cwd, opts, out, tally } = context;
+  out.write(`Applying remediation for ${cveId}...\n`);
+  try {
+    const report = await remediate(cveId, {
+      cwd,
+      packageManager: opts.packageManager,
+      patchesDir: opts.patchesDir,
+      policy: opts.policy,
+      runTests: opts.runTests,
+      constraints: {
+        directDependenciesOnly: opts.directDependenciesOnly,
+        preferVersionBump: opts.preferVersionBump,
+        workspace: opts.workspace,
+      },
+    });
+    if (report.results.some((r) => r.applied)) {
+      out.write(`✅ Successfully applied remediation for ${cveId}!\n`);
+      tally.remediated++;
+    } else {
+      const reason = report.results[0]?.unresolvedReason ?? "unresolved";
+      out.write(`⚠️ Remediation could not be applied automatically (${reason}).\n`);
+      tally.skipped++;
+    }
+  } catch (err) {
+    out.write(`❌ Error remediating ${cveId}: ${errorMessage(err)}\n`);
+    tally.skipped++;
+  }
+}
+
+async function recordSuppression(context: TriageContext, cveId: string): Promise<void> {
+  const { cwd, opts, out, rl, tally } = context;
+  out.write(`Configuring suppression / VEX record for ${cveId}...\n`);
+
+  const justAnswer = await rl.question(
+    "Justification: [1] not_affected (default), [2] mitigated, [3] under_investigation, [4] fixed: ",
+  );
+  const notesAnswer = await rl.question(
+    "Notes/rationale for suppression (optional, press Enter to skip): ",
+  );
+  const suppression: VexSuppression = {
+    cveId,
+    justification: justificationFrom(justAnswer),
+    notes: notesAnswer.trim() || undefined,
+  };
+
+  let persistedTarget: string;
+  if (opts.suppressionsFile) {
+    saveSuppressionToFile(opts.suppressionsFile, suppression);
+    persistedTarget = opts.suppressionsFile;
+  } else {
+    persistedTarget = saveSuppressionToPolicy(cwd, suppression, opts.policy);
+  }
+  if (opts.vexOut) {
+    saveSuppressionToVexDocument(opts.vexOut, suppression);
+    out.write(`  📄 Saved VEX statement to: ${opts.vexOut}\n`);
+  }
+
+  out.write(`✅ Persisted suppression for ${cveId} to ${persistedTarget}\n`);
+  tally.suppressed++;
+}
+
+function justificationFrom(answer: string): VexJustification {
+  const choice = answer.trim().toLowerCase();
+  if (choice === "2" || choice === "mitigated") return "mitigated";
+  if (choice === "3" || choice === "under_investigation") return "under_investigation";
+  if (choice === "4" || choice === "fixed") return "fixed";
+  return "not_affected";
+}
+
+function printSummary(out: NodeJS.WritableStream, total: number, tally: Tally): void {
+  out.write("\n=== Triage Summary ===\n");
+  out.write(`Total evaluated: ${total}\n`);
+  out.write(`Remediated:     ${tally.remediated}\n`);
+  out.write(`Suppressed:     ${tally.suppressed}\n`);
+  out.write(`Skipped:        ${tally.skipped}\n\n`);
 }
 
 export function registerTriageCommand(program: Command): void {
