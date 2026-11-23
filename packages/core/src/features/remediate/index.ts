@@ -42,6 +42,7 @@ export async function remediate(
   const constraints = resolveConstraints(options, cwd);
   const provenance = resolveProvenanceContext(options);
   const correlation = resolveCorrelationContext(options);
+  const context = { constraints, provenance, correlation };
   const model = getModelSpec(options.model);
   const evidence = createRemediateEvidence({
     cwd,
@@ -52,21 +53,9 @@ export async function remediate(
     provenance,
   });
 
-  if (options.resume && options.idempotencyKey) {
-    const cached = readIdempotentReport(cwd, options.idempotencyKey, normalizedCveId);
-    if (cached) {
-      addRemediateResumeStep(evidence, normalizedCveId);
-      const evidenceFile = writeRemediateEvidence(cwd, evidence);
-      return {
-        ...cached,
-        summary: `${cached.summary} (resumed from idempotency cache)`,
-        evidenceFile,
-        correlation,
-        provenance,
-        constraints,
-        resumedFromCache: true,
-      };
-    }
+  const resumed = resumeFromCache({ cwd, cveId: normalizedCveId, options, evidence, ...context });
+  if (resumed) {
+    return resumed;
   }
 
   addRemediateStartStep({
@@ -154,4 +143,37 @@ export async function planRemediation(
   }
   const { runId, planId } = await persistPlan(report, options, cwd);
   return { ...withAutonomy, runId, planId };
+}
+
+interface ResumeInput {
+  cwd: string;
+  cveId: string;
+  options: RemediateOptions;
+  evidence: ReturnType<typeof createRemediateEvidence>;
+  constraints: ReturnType<typeof resolveConstraints>;
+  provenance: ReturnType<typeof resolveProvenanceContext>;
+  correlation: ReturnType<typeof resolveCorrelationContext>;
+}
+
+/** The report a previous run with the same idempotency key produced, when `resume` asks for it. */
+function resumeFromCache(input: ResumeInput): RemediationReport | undefined {
+  const { cwd, cveId, options, evidence } = input;
+  if (!options.resume || !options.idempotencyKey) {
+    return undefined;
+  }
+  const cached = readIdempotentReport(cwd, options.idempotencyKey, cveId);
+  if (!cached) {
+    return undefined;
+  }
+  addRemediateResumeStep(evidence, cveId);
+  const evidenceFile = writeRemediateEvidence(cwd, evidence);
+  return {
+    ...cached,
+    summary: `${cached.summary} (resumed from idempotency cache)`,
+    evidenceFile,
+    correlation: input.correlation,
+    provenance: input.provenance,
+    constraints: input.constraints,
+    resumedFromCache: true,
+  };
 }

@@ -129,52 +129,54 @@ export function exportRecipePackage(options: ExportOptions): ExportResult {
   }
 
   const covered = [...new Set(recipes.map((entry) => entry.recipe.package))].toSorted();
-  write(
-    "package.json",
-    `${JSON.stringify(
-      {
-        name: options.name,
-        version,
-        description: `Autoremediator recipes: how to adopt new versions of ${covered.join(", ")}`,
-        keywords: ["autoremediator", "autoremediator-recipes"],
-        files: [PACKAGE_RECIPES_DIR, "README.md"],
-      },
-      null,
-      2,
-    )}\n`,
-  );
-  write(
-    "README.md",
-    [
-      `# ${options.name}`,
-      "",
-      "Autoremediator recipes: data that describes, for a dependency upgrade, the change to the code that uses",
-      "it. Recipes are never executable and never trusted: autoremediator matches them against your source",
-      "exactly, validates the result like any other proposed patch, and keeps it only if the verifier passes.",
-      "",
-      `Covers: ${covered.map((name) => `\`${name}\``).join(", ")}.`,
-      "",
-      "## Use",
-      "",
-      "```sh",
-      `npm install --save-dev ${options.name}`,
-      "```",
-      "",
-      "Then name it in `.github/autoremediator.yml`:",
-      "",
-      "```yaml",
-      "recipes:",
-      "  packages:",
-      `    - "${options.name}"`,
-      "```",
-      "",
-      "## Publish",
-      "",
-      "```sh",
-      "npm publish --access public   # review recipes/ first: they change your users' source code",
-      "```",
-      "",
-    ].join("\n"),
-  );
+  write("package.json", packageJsonText(options.name, version, covered));
+  write("README.md", readmeText(options.name, covered));
   return { outDir, files, recipes };
+}
+
+function packageJsonText(packageName: string, version: string, covered: readonly string[]): string {
+  return `${JSON.stringify(
+    {
+      name: packageName,
+      version,
+      description: `Autoremediator recipes: how to adopt new versions of ${covered.join(", ")}`,
+      keywords: ["autoremediator", "autoremediator-recipes"],
+      files: [PACKAGE_RECIPES_DIR, "README.md"],
+    },
+    null,
+    2,
+  )}\n`;
+}
+
+function readmeText(packageName: string, covered: readonly string[]): string {
+  return [
+    `# ${packageName}`,
+    "",
+    "Autoremediator recipes: data that describes, for a dependency upgrade, the change to the code that uses",
+    "it. Recipes are never executable and never trusted: autoremediator matches them against your source",
+    "exactly, validates the result like any other proposed patch, and keeps it only if the verifier passes.",
+    "",
+    `Covers: ${covered.map((name) => `\`${name}\``).join(", ")}.`,
+    "",
+    "## Use",
+    "",
+    "```sh",
+    `npm install --save-dev ${packageName}`,
+    "```",
+    "",
+    "Then name it in `.github/autoremediator.yml`:",
+    "",
+    "```yaml",
+    "recipes:",
+    "  packages:",
+    `    - "${packageName}"`,
+    "```",
+    "",
+    "## Publish",
+    "",
+    "```sh",
+    "npm publish --access public   # review recipes/ first: they change your users' source code",
+    "```",
+    "",
+  ].join("\n");
 }

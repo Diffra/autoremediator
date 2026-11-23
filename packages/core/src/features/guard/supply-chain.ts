@@ -89,6 +89,16 @@ export async function verifyPackageTrust(
     };
   }
 
+  return evaluateRelease(packument, packageName, targetVersion, policy);
+}
+
+/** Judges one published version against the supply-chain policy: age, install scripts, provenance. */
+function evaluateRelease(
+  packument: NpmPackument,
+  packageName: string,
+  targetVersion: string,
+  policy: SupplyChainPolicy,
+): PackageTrustVerdict {
   // 1. Check publish age
   let publishAgeHours: number | undefined;
   if (packument.time?.[targetVersion]) {

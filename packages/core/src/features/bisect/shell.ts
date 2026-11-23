@@ -1,5 +1,6 @@
-import { spawn } from "node:child_process";
+import { spawn, type ChildProcessByStdio } from "node:child_process";
 import { homedir } from "node:os";
+import type { Readable } from "node:stream";
 
 import { errorMessage } from "../../shared/errors.js";
 import { sanitizeEnvironment } from "../../shared/exec/safe-exec.js";
@@ -58,24 +59,7 @@ export function runProcess(spec: ProcessSpec): Promise<ProcessResult> {
 
     let child;
     try {
-      if (spec.shell !== undefined) {
-        child = spawn(spec.shell, {
-          cwd: spec.cwd,
-          env,
-          shell: true,
-          detached: !windows,
-          stdio: ["ignore", "pipe", "pipe"],
-        });
-      } else {
-        const [file, ...args] = spec.argv ?? [];
-        if (!file) throw new Error("empty command");
-        child = spawn(file, args, {
-          cwd: spec.cwd,
-          env,
-          detached: !windows,
-          stdio: ["ignore", "pipe", "pipe"],
-        });
-      }
+      child = spawnChild(spec, env, windows);
     } catch (error) {
       output = `could not start: ${errorMessage(error)}`;
       resolve({ exitCode: 127, timedOut: false, aborted: false, durationMs: 0, output });
@@ -187,4 +171,21 @@ export function sanitizeOutput(text: string, options: SanitizeOptions = {}): str
     result = `...${cut !== -1 && cut < 200 ? tail.slice(cut) : tail}`;
   }
   return result;
+}
+
+function spawnChild(
+  spec: ProcessSpec,
+  env: NodeJS.ProcessEnv,
+  windows: boolean,
+): ChildProcessByStdio<null, Readable, Readable> {
+  const options = { cwd: spec.cwd, env, detached: !windows };
+  const stdio: ["ignore", "pipe", "pipe"] = ["ignore", "pipe", "pipe"];
+  if (spec.shell !== undefined) {
+    return spawn(spec.shell, { ...options, shell: true, stdio });
+  }
+  const [file, ...args] = spec.argv ?? [];
+  if (!file) {
+    throw new Error("empty command");
+  }
+  return spawn(file, args, { ...options, stdio });
 }

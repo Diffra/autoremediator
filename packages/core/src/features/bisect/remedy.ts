@@ -49,37 +49,7 @@ function readDirect(cwd: string): Set<string> {
 export async function planRemedy(request: RemedyRequest): Promise<BisectRemedy> {
   const locked = readLocked(request.cwd, request.lockfile);
   const direct = readDirect(request.cwd);
-  const notPlanned: BisectRemedy["notPlanned"] = [];
-  const results: PatchResult[] = [];
-
-  for (const culprit of request.culprits) {
-    const versions = locked?.get(culprit.packageName);
-    if (!locked) {
-      notPlanned.push({
-        packageName: culprit.packageName,
-        reason: `${request.lockfile} does not exist in ${request.cwd}`,
-      });
-    } else if (!versions?.has(culprit.toVersion)) {
-      notPlanned.push({
-        packageName: culprit.packageName,
-        reason: versions?.size
-          ? `the working tree locks ${[...versions].toSorted().join(", ")}, not ${culprit.toVersion}`
-          : "the working tree does not lock this package",
-      });
-    } else {
-      const scope = direct.has(culprit.packageName) ? "direct" : "transitive";
-      results.push({
-        packageName: culprit.packageName,
-        strategy: scope === "direct" ? "version-bump" : "override",
-        fromVersion: culprit.toVersion,
-        toVersion: culprit.fromVersion,
-        applied: false,
-        dryRun: true,
-        dependencyScope: scope,
-        message: `Pin ${culprit.packageName} back to ${culprit.fromVersion}: ${culprit.toVersion} breaks \`${request.command}\`.`,
-      });
-    }
-  }
+  const { results, notPlanned } = selectPins(request, locked, direct);
 
   const pins = results.map((result) => ({
     packageName: result.packageName,
@@ -117,6 +87,56 @@ export async function planRemedy(request: RemedyRequest): Promise<BisectRemedy> 
   };
   if (!request.apply) return remedy;
 
+  return applyRemedy(request, remedy, pins, runId);
+}
+
+/** Splits the culprits into pins the working tree can take and culprits it cannot. */
+function selectPins(
+  request: RemedyRequest,
+  locked: ReturnType<typeof readLocked>,
+  direct: ReturnType<typeof readDirect>,
+): { results: PatchResult[]; notPlanned: BisectRemedy["notPlanned"] } {
+  const notPlanned: BisectRemedy["notPlanned"] = [];
+  const results: PatchResult[] = [];
+
+  for (const culprit of request.culprits) {
+    const versions = locked?.get(culprit.packageName);
+    if (!locked) {
+      notPlanned.push({
+        packageName: culprit.packageName,
+        reason: `${request.lockfile} does not exist in ${request.cwd}`,
+      });
+    } else if (!versions?.has(culprit.toVersion)) {
+      notPlanned.push({
+        packageName: culprit.packageName,
+        reason: versions?.size
+          ? `the working tree locks ${[...versions].toSorted().join(", ")}, not ${culprit.toVersion}`
+          : "the working tree does not lock this package",
+      });
+    } else {
+      const scope = direct.has(culprit.packageName) ? "direct" : "transitive";
+      results.push({
+        packageName: culprit.packageName,
+        strategy: scope === "direct" ? "version-bump" : "override",
+        fromVersion: culprit.toVersion,
+        toVersion: culprit.fromVersion,
+        applied: false,
+        dryRun: true,
+        dependencyScope: scope,
+        message: `Pin ${culprit.packageName} back to ${culprit.fromVersion}: ${culprit.toVersion} breaks \`${request.command}\`.`,
+      });
+    }
+  }
+  return { results, notPlanned };
+}
+
+/** Applies the planned run and checks that the lockfile now holds the good versions. */
+async function applyRemedy(
+  request: RemedyRequest,
+  remedy: BisectRemedy,
+  pins: BisectRemedy["pins"],
+  runId: string,
+): Promise<BisectRemedy> {
   const run = await (request.applyPlanFn ?? applyPlan)({ cwd: request.cwd, runId });
   const after = readLocked(request.cwd, request.lockfile);
   const unchanged = pins.filter((pin) => {

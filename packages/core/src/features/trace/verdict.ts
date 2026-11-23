@@ -90,6 +90,20 @@ export function assessRuntimeReachability(
     };
   }
 
+  return assessCalls({ found, loaded, loadedText, failed, symbol });
+}
+
+interface CallEvidence {
+  found: Omit<RuntimeReachability, "verdict" | "reason" | "calls">;
+  loaded: readonly TracePackage[];
+  loadedText: string;
+  failed: string;
+  symbol: string | undefined;
+}
+
+/** The verdict once the package is known to be loaded and its calls were counted. */
+function assessCalls(evidence: CallEvidence): RuntimeReachability {
+  const { found, loaded, loadedText, failed, symbol } = evidence;
   if (symbol === undefined) {
     const total = loaded.reduce(
       (sum, pkg) => sum + Object.values(pkg.calls ?? {}).reduce((a, b) => a + b, 0),

@@ -42,35 +42,7 @@ export function metadataFlags(
     .toSorted((a, b) => semver.compare(a.version, b.version));
   const flags: RadarFlag[] = [];
 
-  // A release after a version the maintainers deprecated for security reasons. One notice repeated
-  // on many versions is a single signal: it is reported once, at the first release it leads to.
-  const noticed = new Map<string, { flag: RadarFlag; count: number }>();
-  for (const [index, entry] of ordered.entries()) {
-    if (!entry.deprecated || semver.lt(entry.version, from) || semver.gte(entry.version, to)) {
-      continue;
-    }
-    if (!mentionsSecurity(entry.deprecated)) continue;
-    const successor = ordered[index + 1];
-    if (!successor || semver.gt(successor.version, to)) continue;
-    const seen = noticed.get(entry.deprecated);
-    if (seen) {
-      seen.count++;
-      continue;
-    }
-    noticed.set(entry.deprecated, {
-      count: 1,
-      flag: {
-        category: "metadata",
-        signal: "deprecated-for-security",
-        release: successor.version,
-        points: RADAR_POINTS.metadata["deprecated-for-security"],
-        location: sanitizeEvidence(`registry:versions.${entry.version}.deprecated`, 120),
-        evidence: evidenceLine(`${entry.version} deprecated`, `"${entry.deprecated}"`),
-        occurrences: 1,
-      },
-    });
-  }
-  for (const { flag, count } of noticed.values()) flags.push({ ...flag, occurrences: count });
+  flags.push(...deprecatedForSecurityFlags(ordered, from, to));
 
   const inRange = ordered.filter(
     (entry) => semver.gt(entry.version, from) && semver.lte(entry.version, to),
@@ -126,6 +98,46 @@ export function metadataFlags(
       });
       break;
     }
+  }
+  return flags;
+}
+
+function deprecatedForSecurityFlags(
+  ordered: readonly PackumentVersion[],
+  from: string,
+  to: string,
+): RadarFlag[] {
+  // A release after a version the maintainers deprecated for security reasons. One notice repeated
+  // on many versions is a single signal: it is reported once, at the first release it leads to.
+  const noticed = new Map<string, { flag: RadarFlag; count: number }>();
+  for (const [index, entry] of ordered.entries()) {
+    if (!entry.deprecated || semver.lt(entry.version, from) || semver.gte(entry.version, to)) {
+      continue;
+    }
+    if (!mentionsSecurity(entry.deprecated)) continue;
+    const successor = ordered[index + 1];
+    if (!successor || semver.gt(successor.version, to)) continue;
+    const seen = noticed.get(entry.deprecated);
+    if (seen) {
+      seen.count++;
+      continue;
+    }
+    noticed.set(entry.deprecated, {
+      count: 1,
+      flag: {
+        category: "metadata",
+        signal: "deprecated-for-security",
+        release: successor.version,
+        points: RADAR_POINTS.metadata["deprecated-for-security"],
+        location: sanitizeEvidence(`registry:versions.${entry.version}.deprecated`, 120),
+        evidence: evidenceLine(`${entry.version} deprecated`, `"${entry.deprecated}"`),
+        occurrences: 1,
+      },
+    });
+  }
+  const flags: RadarFlag[] = [];
+  for (const { flag, count } of noticed.values()) {
+    flags.push({ ...flag, occurrences: count });
   }
   return flags;
 }
