@@ -114,30 +114,7 @@ export function foldTraceRecords(
 
   const packages: TracePackage[] = [...byPackage.values()]
     .toSorted((a, b) => a.name.localeCompare(b.name) || a.version.localeCompare(b.version))
-    .map((found) => {
-      const result: TracePackage = {
-        name: found.name,
-        version: found.version,
-        entries: [...found.entries].toSorted((a, b) => a.localeCompare(b)),
-        dependents: [...found.dependents].toSorted((a, b) => a.localeCompare(b)),
-        formats: [...found.formats].toSorted((a, b) => a.localeCompare(b)),
-      };
-      if (found.wrapped.size > 0 || found.unwrapped.size > 0 || found.calls.size > 0) {
-        const wrapped = new Set([...found.wrapped, ...found.calls.keys()]);
-        result.wrapped = [...wrapped].toSorted((a, b) => a.localeCompare(b));
-        result.calls = Object.fromEntries(
-          [...wrapped]
-            .toSorted((a, b) => a.localeCompare(b))
-            .map((name) => [name, found.calls.get(name) ?? 0]),
-        );
-        if (found.unwrapped.size > 0) {
-          result.unwrapped = Object.fromEntries(
-            [...found.unwrapped].toSorted(([a], [b]) => a.localeCompare(b)),
-          );
-        }
-      }
-      return result;
-    });
+    .map((found) => toTracePackage(found));
 
   const report: TraceReport = {
     schema: TRACE_SCHEMA,
@@ -190,4 +167,29 @@ export function readTraceFile(path: string): TraceReport {
     );
   }
   return foldTraceRecords(records, { skipped });
+}
+
+function toTracePackage(found: Accumulator): TracePackage {
+  const result: TracePackage = {
+    name: found.name,
+    version: found.version,
+    entries: [...found.entries].toSorted((a, b) => a.localeCompare(b)),
+    dependents: [...found.dependents].toSorted((a, b) => a.localeCompare(b)),
+    formats: [...found.formats].toSorted((a, b) => a.localeCompare(b)),
+  };
+  if (found.wrapped.size > 0 || found.unwrapped.size > 0 || found.calls.size > 0) {
+    const wrapped = new Set([...found.wrapped, ...found.calls.keys()]);
+    result.wrapped = [...wrapped].toSorted((a, b) => a.localeCompare(b));
+    result.calls = Object.fromEntries(
+      [...wrapped]
+        .toSorted((a, b) => a.localeCompare(b))
+        .map((name) => [name, found.calls.get(name) ?? 0]),
+    );
+    if (found.unwrapped.size > 0) {
+      result.unwrapped = Object.fromEntries(
+        [...found.unwrapped].toSorted(([a], [b]) => a.localeCompare(b)),
+      );
+    }
+  }
+  return result;
 }

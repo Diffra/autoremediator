@@ -91,17 +91,7 @@ export function findMaintainerVex(
       skip(`${maintainer.name}@${maintainer.version} dates its statement in the future`);
       continue;
     }
-    // Newest statement wins; on a tie, a statement that is not `not_affected` wins, then the higher version.
-    const latest = dated.toSorted((a, b) => {
-      const byTime =
-        stamp(b.statement, shipped.document.timestamp) -
-        stamp(a.statement, shipped.document.timestamp);
-      if (byTime !== 0) return byTime;
-      const aOk = a.statement.status === "not_affected" ? 1 : 0;
-      const bOk = b.statement.status === "not_affected" ? 1 : 0;
-      if (aOk !== bOk) return aOk - bOk;
-      return (b.statement.version ?? 0) - (a.statement.version ?? 0);
-    })[0]!;
+    const latest = newestStatement(dated, shipped.document.timestamp);
     const { statement } = latest;
     if (statement.status !== "not_affected") {
       skip(`${maintainer.name}@${maintainer.version} says ${statement.status}, not not_affected`);
@@ -113,19 +103,7 @@ export function findMaintainerVex(
       );
       continue;
     }
-    evidence.push({
-      maintainer,
-      file: shipped.file,
-      documentId: shipped.document["@id"],
-      author: shipped.document.author,
-      ...(statement["@id"] ? { statementId: statement["@id"] } : {}),
-      status: "not_affected",
-      justification: statement.justification,
-      ...(statement.impact_statement ? { impactStatement: statement.impact_statement } : {}),
-      ...(statement.status_notes ? { statusNotes: statement.status_notes } : {}),
-      timestamp: statement.timestamp ?? shipped.document.timestamp,
-      subcomponent: latest.subcomponents !== undefined,
-    });
+    evidence.push(evidenceOf(shipped, latest, statement.justification));
   }
   // One maintainer saying the advisory affects the package outweighs another saying it does not:
   // acting on "not affected" needs nobody installed to disagree.
@@ -141,4 +119,42 @@ export function findMaintainerVex(
     }
   }
   return { evidence, ignored };
+}
+
+type StatementTimestamp = Parameters<typeof stamp>[1];
+
+/** Newest statement wins; on a tie, a statement that is not `not_affected` wins, then the higher version. */
+function newestStatement(
+  dated: readonly ShippedStatement[],
+  documentTimestamp: StatementTimestamp,
+): ShippedStatement {
+  return dated.toSorted((a, b) => {
+    const byTime = stamp(b.statement, documentTimestamp) - stamp(a.statement, documentTimestamp);
+    if (byTime !== 0) return byTime;
+    const aOk = a.statement.status === "not_affected" ? 1 : 0;
+    const bOk = b.statement.status === "not_affected" ? 1 : 0;
+    if (aOk !== bOk) return aOk - bOk;
+    return (b.statement.version ?? 0) - (a.statement.version ?? 0);
+  })[0]!;
+}
+
+function evidenceOf(
+  shipped: MaintainerVexIndex["documents"][number],
+  latest: ShippedStatement,
+  justification: NonNullable<ShippedStatement["statement"]["justification"]>,
+): MaintainerVexEvidence {
+  const { statement } = latest;
+  return {
+    maintainer: shipped.package,
+    file: shipped.file,
+    documentId: shipped.document["@id"],
+    author: shipped.document.author,
+    ...(statement["@id"] ? { statementId: statement["@id"] } : {}),
+    status: "not_affected",
+    justification,
+    ...(statement.impact_statement ? { impactStatement: statement.impact_statement } : {}),
+    ...(statement.status_notes ? { statusNotes: statement.status_notes } : {}),
+    timestamp: statement.timestamp ?? shipped.document.timestamp,
+    subcomponent: latest.subcomponents !== undefined,
+  };
 }

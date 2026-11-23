@@ -279,73 +279,9 @@ export async function scanDelta(options: DeltaScanOptions = {}): Promise<DeltaSc
   const introducedFindings: DeltaFinding[] = [];
   const resolvedFindings: DeltaFinding[] = [];
 
-  // Evaluate newly added or modified dependencies
   for (const change of dependencyChanges) {
-    if (
-      change.changeType === "added" ||
-      change.changeType === "upgraded" ||
-      change.changeType === "downgraded"
-    ) {
-      const cleanVer = semver.coerce(change.newVersion)?.version ?? change.newVersion;
-      const evaluation = await evaluatePackage(change.packageName, {
-        version: cleanVer,
-        enrichIntelligence: true,
-      });
-
-      for (const vuln of evaluation.vulnerabilities) {
-        introducedFindings.push({
-          packageName: change.packageName,
-          cveId: vuln.cveId,
-          severity: vuln.severity,
-          summary: vuln.summary,
-          deltaType: "introduced",
-          installedVersion: change.newVersion,
-          safeUpgradeVersion: vuln.safeUpgradeVersion,
-          inCisaKev: vuln.inCisaKev,
-          epssScore: vuln.epssScore,
-        });
-      }
-    }
-
-    // Check if the old version had vulnerabilities resolved by this upgrade/removal
-    if (
-      change.oldVersion &&
-      (change.changeType === "upgraded" || change.changeType === "removed")
-    ) {
-      const cleanOldVer = semver.coerce(change.oldVersion)?.version ?? change.oldVersion;
-      const oldEval = await evaluatePackage(change.packageName, {
-        version: cleanOldVer,
-        enrichIntelligence: true,
-      });
-
-      const cleanNewVer = change.newVersion
-        ? (semver.coerce(change.newVersion)?.version ?? change.newVersion)
-        : undefined;
-      const newEval = cleanNewVer
-        ? await evaluatePackage(change.packageName, {
-            version: cleanNewVer,
-            enrichIntelligence: false,
-          })
-        : { vulnerabilities: [] };
-
-      const newCveSet = new Set(newEval.vulnerabilities.map((v) => v.cveId));
-
-      for (const oldVuln of oldEval.vulnerabilities) {
-        if (!newCveSet.has(oldVuln.cveId)) {
-          resolvedFindings.push({
-            packageName: change.packageName,
-            cveId: oldVuln.cveId,
-            severity: oldVuln.severity,
-            summary: oldVuln.summary,
-            deltaType: "resolved",
-            installedVersion: change.oldVersion,
-            safeUpgradeVersion: oldVuln.safeUpgradeVersion,
-            inCisaKev: oldVuln.inCisaKev,
-            epssScore: oldVuln.epssScore,
-          });
-        }
-      }
-    }
+    introducedFindings.push(...(await findIntroduced(change)));
+    resolvedFindings.push(...(await findResolved(change)));
   }
 
   let netRiskVerdict: DeltaScanReport["netRiskVerdict"] = "neutral";
@@ -396,4 +332,81 @@ function summarizeDelta(
     return `${prefix} resolved ${resolved} vulnerability(ies) ${across} (net risk: improved).`;
   }
   return `${prefix} found 0 new vulnerabilities ${across} (net risk: neutral).`;
+}
+
+type DependencyChange = Awaited<
+  ReturnType<typeof collectDependencyChanges>
+>["dependencyChanges"][number];
+
+/** Vulnerabilities in a version this change adds or moves to. */
+async function findIntroduced(change: DependencyChange): Promise<DeltaFinding[]> {
+  const introduced: DeltaFinding[] = [];
+  if (
+    change.changeType === "added" ||
+    change.changeType === "upgraded" ||
+    change.changeType === "downgraded"
+  ) {
+    const cleanVer = semver.coerce(change.newVersion)?.version ?? change.newVersion;
+    const evaluation = await evaluatePackage(change.packageName, {
+      version: cleanVer,
+      enrichIntelligence: true,
+    });
+
+    for (const vuln of evaluation.vulnerabilities) {
+      introduced.push({
+        packageName: change.packageName,
+        cveId: vuln.cveId,
+        severity: vuln.severity,
+        summary: vuln.summary,
+        deltaType: "introduced",
+        installedVersion: change.newVersion,
+        safeUpgradeVersion: vuln.safeUpgradeVersion,
+        inCisaKev: vuln.inCisaKev,
+        epssScore: vuln.epssScore,
+      });
+    }
+  }
+  return introduced;
+}
+
+/** Vulnerabilities the old version had that this change upgrades away or removes. */
+async function findResolved(change: DependencyChange): Promise<DeltaFinding[]> {
+  const resolved: DeltaFinding[] = [];
+  // Check if the old version had vulnerabilities resolved by this upgrade/removal
+  if (change.oldVersion && (change.changeType === "upgraded" || change.changeType === "removed")) {
+    const cleanOldVer = semver.coerce(change.oldVersion)?.version ?? change.oldVersion;
+    const oldEval = await evaluatePackage(change.packageName, {
+      version: cleanOldVer,
+      enrichIntelligence: true,
+    });
+
+    const cleanNewVer = change.newVersion
+      ? (semver.coerce(change.newVersion)?.version ?? change.newVersion)
+      : undefined;
+    const newEval = cleanNewVer
+      ? await evaluatePackage(change.packageName, {
+          version: cleanNewVer,
+          enrichIntelligence: false,
+        })
+      : { vulnerabilities: [] };
+
+    const newCveSet = new Set(newEval.vulnerabilities.map((v) => v.cveId));
+
+    for (const oldVuln of oldEval.vulnerabilities) {
+      if (!newCveSet.has(oldVuln.cveId)) {
+        resolved.push({
+          packageName: change.packageName,
+          cveId: oldVuln.cveId,
+          severity: oldVuln.severity,
+          summary: oldVuln.summary,
+          deltaType: "resolved",
+          installedVersion: change.oldVersion,
+          safeUpgradeVersion: oldVuln.safeUpgradeVersion,
+          inCisaKev: oldVuln.inCisaKev,
+          epssScore: oldVuln.epssScore,
+        });
+      }
+    }
+  }
+  return resolved;
 }

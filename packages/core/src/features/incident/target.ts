@@ -52,56 +52,11 @@ export async function resolveTarget(
   }
 
   if (!isAdvisoryId(typed)) {
-    const parsed = parsePackageSpec(typed);
-    if (parsed.kind !== "registry") {
-      throw new Error(
-        parsed.kind === "invalid"
-          ? `"${typed.slice(0, 80)}" is neither an advisory id nor a package spec (${parsed.reason}).`
-          : `"${typed.slice(0, 80)}" is not a registry package spec.`,
-      );
-    }
-    if (!parsed.range) {
-      throw new Error(
-        `Say which versions of ${parsed.name} are bad: "${parsed.name}@1.2.3" or "${parsed.name}@>=1.2.0 <1.2.5" (quote it in the shell).`,
-      );
-    }
-    const range = normalizeRange(parsed.range);
-    if (!range) {
-      throw new Error(`"${parsed.range}" is not a valid semver range for ${parsed.name}.`);
-    }
-    return { input: typed, kind: "package-range", affected: [{ name: parsed.name, range }] };
+    return packageRangeTarget(typed);
   }
 
   const id = normalizeAdvisoryId(typed);
-  let details: CveDetails | null;
-  let source: NonNullable<IncidentTarget["advisory"]>["source"];
-  if (options.offline) {
-    if (!options.intelligenceSnapshotPath) {
-      throw new Error(
-        `${id} cannot be looked up offline without an intelligence snapshot. Pass the snapshot, or name the package and versions directly (package@range), which needs no lookup.`,
-      );
-    }
-    details = lookupSnapshotCve(loadIntelligenceSnapshot(options.intelligenceSnapshotPath), id);
-    source = "offline-snapshot";
-  } else {
-    const [osv, github] = await Promise.all([
-      deps.lookupOsv(id),
-      deps.lookupGitHub(id).catch(() => []),
-    ]);
-    details =
-      osv ??
-      (github.length > 0
-        ? {
-            id,
-            summary: "Details from the GitHub Advisory Database.",
-            severity: "UNKNOWN",
-            references: [],
-            affectedPackages: [],
-          }
-        : null);
-    if (details && github.length > 0) details = mergeGhDataIntoCveDetails(details, github);
-    source = osv ? "osv" : "github-advisory";
-  }
+  const { details, source } = await lookupAdvisory(id, options, deps);
   if (!details) {
     throw new Error(
       options.offline
@@ -142,4 +97,67 @@ export async function resolveTarget(
     },
     affected,
   };
+}
+
+/** `package@range` as typed: the named package and the versions that are bad. */
+function packageRangeTarget(typed: string): IncidentTarget {
+  const parsed = parsePackageSpec(typed);
+  if (parsed.kind !== "registry") {
+    throw new Error(
+      parsed.kind === "invalid"
+        ? `"${typed.slice(0, 80)}" is neither an advisory id nor a package spec (${parsed.reason}).`
+        : `"${typed.slice(0, 80)}" is not a registry package spec.`,
+    );
+  }
+  if (!parsed.range) {
+    throw new Error(
+      `Say which versions of ${parsed.name} are bad: "${parsed.name}@1.2.3" or "${parsed.name}@>=1.2.0 <1.2.5" (quote it in the shell).`,
+    );
+  }
+  const range = normalizeRange(parsed.range);
+  if (!range) {
+    throw new Error(`"${parsed.range}" is not a valid semver range for ${parsed.name}.`);
+  }
+  return { input: typed, kind: "package-range", affected: [{ name: parsed.name, range }] };
+}
+
+/** The advisory's details and where they came from: the offline snapshot, OSV or GitHub. */
+async function lookupAdvisory(
+  id: string,
+  options: { offline?: boolean; intelligenceSnapshotPath?: string },
+  deps: TargetDeps,
+): Promise<{
+  details: CveDetails | null;
+  source: NonNullable<IncidentTarget["advisory"]>["source"];
+}> {
+  let details: CveDetails | null;
+  let source: NonNullable<IncidentTarget["advisory"]>["source"];
+  if (options.offline) {
+    if (!options.intelligenceSnapshotPath) {
+      throw new Error(
+        `${id} cannot be looked up offline without an intelligence snapshot. Pass the snapshot, or name the package and versions directly (package@range), which needs no lookup.`,
+      );
+    }
+    details = lookupSnapshotCve(loadIntelligenceSnapshot(options.intelligenceSnapshotPath), id);
+    source = "offline-snapshot";
+  } else {
+    const [osv, github] = await Promise.all([
+      deps.lookupOsv(id),
+      deps.lookupGitHub(id).catch(() => []),
+    ]);
+    details =
+      osv ??
+      (github.length > 0
+        ? {
+            id,
+            summary: "Details from the GitHub Advisory Database.",
+            severity: "UNKNOWN",
+            references: [],
+            affectedPackages: [],
+          }
+        : null);
+    if (details && github.length > 0) details = mergeGhDataIntoCveDetails(details, github);
+    source = osv ? "osv" : "github-advisory";
+  }
+  return { details, source };
 }

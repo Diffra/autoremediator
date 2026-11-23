@@ -108,45 +108,7 @@ export const fetchPackageSourceTool = defineTool({
         : extractDir;
 
       // Step 4: Recursively find and read matching source files
-      const sourceCode: Record<string, string> = {};
-
-      async function walkDir(dir: string, relativeBase: string): Promise<void> {
-        try {
-          const files = await readdir(dir, { withFileTypes: true });
-
-          for (const file of files) {
-            const fullPath = join(dir, file.name);
-            const relPath = join(relativeBase, file.name);
-
-            if (file.isDirectory()) {
-              // Skip non-source directories (retain dist, build, and out for published packages)
-              if (!["node_modules", ".git", "coverage", ".next"].includes(file.name)) {
-                await walkDir(fullPath, relPath);
-              }
-            } else if (file.isFile()) {
-              // Check if file matches any pattern (escape dots before expanding wildcards)
-              const matches = safePatterns.some((pattern) => {
-                const escaped = pattern.replaceAll(".", String.raw`\.`).replaceAll("*", ".*");
-                const regex = new RegExp(`^${escaped}$`);
-                return regex.test(file.name);
-              });
-
-              if (matches) {
-                try {
-                  const content = await readFile(fullPath, "utf8");
-                  sourceCode[relPath] = content;
-                } catch {
-                  // Skip files that can't be read as UTF-8
-                }
-              }
-            }
-          }
-        } catch {
-          // Skip directories that can't be read
-        }
-      }
-
-      await walkDir(packageRootDir, "");
+      const sourceCode = await collectSourceFiles(packageRootDir, safePatterns);
 
       if (Object.keys(sourceCode).length === 0) {
         return {
@@ -176,3 +138,50 @@ export const fetchPackageSourceTool = defineTool({
     }
   },
 });
+
+/** Reads every file under `root` whose name matches one of `patterns`, keyed by relative path. */
+async function collectSourceFiles(
+  root: string,
+  safePatterns: readonly string[],
+): Promise<Record<string, string>> {
+  const sourceCode: Record<string, string> = {};
+
+  async function walkDir(dir: string, relativeBase: string): Promise<void> {
+    try {
+      const files = await readdir(dir, { withFileTypes: true });
+
+      for (const file of files) {
+        const fullPath = join(dir, file.name);
+        const relPath = join(relativeBase, file.name);
+
+        if (file.isDirectory()) {
+          // Skip non-source directories (retain dist, build, and out for published packages)
+          if (!["node_modules", ".git", "coverage", ".next"].includes(file.name)) {
+            await walkDir(fullPath, relPath);
+          }
+        } else if (file.isFile()) {
+          // Check if file matches any pattern (escape dots before expanding wildcards)
+          const matches = safePatterns.some((pattern) => {
+            const escaped = pattern.replaceAll(".", String.raw`\.`).replaceAll("*", ".*");
+            const regex = new RegExp(`^${escaped}$`);
+            return regex.test(file.name);
+          });
+
+          if (matches) {
+            try {
+              const content = await readFile(fullPath, "utf8");
+              sourceCode[relPath] = content;
+            } catch {
+              // Skip files that can't be read as UTF-8
+            }
+          }
+        }
+      }
+    } catch {
+      // Skip directories that can't be read
+    }
+  }
+
+  await walkDir(root, "");
+  return sourceCode;
+}

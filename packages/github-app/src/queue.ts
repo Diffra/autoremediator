@@ -48,45 +48,16 @@ export function createInMemoryJobQueue(initialJobs: QueueJob[] = []): JobQueue {
     jobs.set(job.id, { ...job });
   }
 
-  const getActiveByDedupeKey = (dedupeKey: string): QueueJob | undefined => {
-    for (const job of jobs.values()) {
-      if (job.dedupeKey !== dedupeKey) {
-        continue;
-      }
-
-      if (job.status === "queued" || job.status === "running") {
-        return job;
-      }
-    }
-
-    return undefined;
-  };
-
   return {
     enqueue(input: QueueJobInput): QueueJob {
       if (input.dedupeKey) {
-        const existing = getActiveByDedupeKey(input.dedupeKey);
+        const existing = findActiveByDedupeKey(jobs, input.dedupeKey);
         if (existing) {
           return existing;
         }
       }
 
-      const createdAt = nowIso();
-      const job: QueueJob = {
-        id: randomUUID(),
-        eventName: input.eventName,
-        installationId: input.installationId,
-        deliveryId: input.deliveryId,
-        payload: input.payload,
-        dedupeKey: input.dedupeKey,
-        status: "queued",
-        attempts: 0,
-        maxAttempts: input.maxAttempts,
-        nextRunAt: input.nextRunAt ?? createdAt,
-        createdAt,
-        updatedAt: createdAt,
-      };
-
+      const job = newQueuedJob(input);
       jobs.set(job.id, job);
       return job;
     },
@@ -240,3 +211,33 @@ export function createFileBackedJobQueue(filePath: string): JobQueue {
 }
 
 export type { JobQueue, QueueJobInput };
+
+function findActiveByDedupeKey(
+  jobs: Map<string, QueueJob>,
+  dedupeKey: string,
+): QueueJob | undefined {
+  for (const job of jobs.values()) {
+    if (job.dedupeKey === dedupeKey && (job.status === "queued" || job.status === "running")) {
+      return job;
+    }
+  }
+  return undefined;
+}
+
+function newQueuedJob(input: QueueJobInput): QueueJob {
+  const createdAt = nowIso();
+  return {
+    id: randomUUID(),
+    eventName: input.eventName,
+    installationId: input.installationId,
+    deliveryId: input.deliveryId,
+    payload: input.payload,
+    dedupeKey: input.dedupeKey,
+    status: "queued",
+    attempts: 0,
+    maxAttempts: input.maxAttempts,
+    nextRunAt: input.nextRunAt ?? createdAt,
+    createdAt,
+    updatedAt: createdAt,
+  };
+}

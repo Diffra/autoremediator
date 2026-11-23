@@ -130,6 +130,19 @@ export function attackSurface(input: SurfaceInputs): AttackSurface {
     },
   ];
 
+  const limits = surfaceLimits(input);
+
+  return {
+    score: Math.round(components.reduce((total, component) => total + component.points, 0)),
+    formulaVersion: 1,
+    components,
+    facts: surfaceFacts(input),
+    limits,
+  };
+}
+
+/** What the score cannot see, stated next to it so a low number is not read as a clean bill. */
+function surfaceLimits(input: SurfaceInputs): string[] {
   const limits: string[] = [];
   if (input.lockfileNote) {
     limits.push(
@@ -143,23 +156,20 @@ export function attackSurface(input: SurfaceInputs): AttackSurface {
   limits.push(
     "unmaintained packages are not detected: that needs registry data, and only the lockfile's deprecation flag is read",
   );
+  return limits;
+}
 
+function surfaceFacts(input: SurfaceInputs): AttackSurface["facts"] {
   return {
-    score: Math.round(components.reduce((total, component) => total + component.points, 0)),
-    formulaVersion: 1,
-    components,
-    facts: {
-      installedPackages: input.installedPackages,
-      directDependencies: input.directDependencies,
-      maxDepth: input.maxDepth,
-      installScriptPackages: input.installScriptPackages,
-      deprecatedPackages: input.deprecatedPackages,
-      certainlyUnused: input.certainlyUnused,
-      probablyUnused: input.probablyUnused,
-      replaceable: input.replaceable,
-      extraCopies: input.extraCopies,
-      manifestsRead: input.manifestsRead,
-    },
-    limits,
+    installedPackages: input.installedPackages,
+    directDependencies: input.directDependencies,
+    maxDepth: input.maxDepth,
+    installScriptPackages: input.installScriptPackages,
+    deprecatedPackages: input.deprecatedPackages,
+    certainlyUnused: input.certainlyUnused,
+    probablyUnused: input.probablyUnused,
+    replaceable: input.replaceable,
+    extraCopies: input.extraCopies,
+    manifestsRead: input.manifestsRead,
   };
 }
