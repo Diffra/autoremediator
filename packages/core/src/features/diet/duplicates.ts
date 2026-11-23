@@ -16,8 +16,9 @@ const highest = (versions: readonly string[]): string | undefined =>
   versions.toSorted((left, right) => semver.rcompare(left, right))[0];
 
 function parentOf(graph: LockGraph, edge: LockEdge): DuplicateParent {
-  if (edge.fromDirect)
+  if (edge.fromDirect) {
     return { name: edge.from, ...(edge.range ? { range: edge.range } : {}), direct: true };
+  }
   const node = graph.nodes.get(edge.from);
   return {
     name: node?.name ?? edge.from,

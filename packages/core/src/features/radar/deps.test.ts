@@ -123,8 +123,9 @@ function stubNetwork(options: { githubStatus?: number; githubRemaining?: string 
         },
       });
     }
-    if (url.endsWith("pkg-1.0.1.tgz") || url.endsWith("pkg-1.0.2.tgz"))
+    if (url.endsWith("pkg-1.0.1.tgz") || url.endsWith("pkg-1.0.2.tgz")) {
       return new Response(tarballWithDocs);
+    }
     if (url === "https://registry.npmjs.org/gone") return json({}, 404);
     if (url === "https://api.osv.dev/v1/query") {
       expect(init?.method).toBe("POST");

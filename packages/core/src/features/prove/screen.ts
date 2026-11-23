@@ -103,10 +103,12 @@ function visit(node: Node, walk: Walk, parent?: Node): void {
       const name = node.name as string;
       const why = FORBIDDEN_IDENTIFIERS[name];
       if (why) walk.violations.add(`${name}: ${why}`);
-      if (name === "require")
+      if (name === "require") {
         walk.violations.add("uses `require` other than by calling it with a literal module name");
-      if (name === "process")
+      }
+      if (name === "process") {
         walk.violations.add("uses `process` other than exit, exitCode, stdout, stderr or nextTick");
+      }
       return;
     }
     case "MetaProperty": {
@@ -139,8 +141,9 @@ function visit(node: Node, walk: Walk, parent?: Node): void {
             "reads a version (the script must call the package, not look at its version)",
           );
         }
-        if (name === "constructor")
+        if (name === "constructor") {
           walk.violations.add("reaches the Function constructor through `.constructor`");
+        }
       }
       if (isNode(object) && object.type === "Identifier" && object.name === "process") {
         if (
@@ -169,11 +172,12 @@ function visit(node: Node, walk: Walk, parent?: Node): void {
       if (isNode(callee) && callee.type === "Identifier" && callee.name === "require") {
         const args = node.arguments as unknown[];
         const specifier = literalString(args[0]);
-        if (specifier === undefined || args.length !== 1)
+        if (specifier === undefined || args.length !== 1) {
           walk.violations.add("loads a module by a computed name");
-        else walk.specifiers.push(specifier);
-        for (const arg of args)
+        } else walk.specifiers.push(specifier);
+        for (const arg of args) {
           if (isNode(arg) && literalString(arg) === undefined) visit(arg, walk, node);
+        }
         return;
       }
       break;

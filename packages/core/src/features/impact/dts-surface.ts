@@ -301,8 +301,9 @@ function mergeInto(target: ApiSymbol, incoming: ApiSymbol): void {
   ];
   if (priority.indexOf(incoming.kind) < priority.indexOf(target.kind)) target.kind = incoming.kind;
   target.signatures.push(...incoming.signatures);
-  for (const member of incoming.members.values())
+  for (const member of incoming.members.values()) {
     addMember(target, { ...member, signatures: [...member.signatures] });
+  }
   target.type ??= incoming.type;
   target.extends ??= incoming.extends;
   if (incoming.typeRefs) target.typeRefs = [...(target.typeRefs ?? []), ...incoming.typeRefs];
@@ -319,8 +320,9 @@ function mergeInto(target: ApiSymbol, incoming: ApiSymbol): void {
 /** Named types and inline object members a declared type is made of (`A & B & { c(): void }`). */
 function collectTypeShape(code: string, symbol: ApiSymbol, type: AstNode): void {
   if (type.type === "TSIntersectionType") {
-    for (const part of (type.types as AstNode[] | undefined) ?? [])
+    for (const part of (type.types as AstNode[] | undefined) ?? []) {
       collectTypeShape(code, symbol, part);
+    }
   } else if (type.type === "TSTypeReference") {
     const name = typeName(type.typeName as AstNode | undefined);
     if (name) symbol.typeRefs = [...(symbol.typeRefs ?? []), name];
@@ -516,12 +518,13 @@ function readDtsFile(path: string, code: string): DtsFileInfo | undefined {
       case "ExportAllDeclaration": {
         const source = (statement.source as { value?: string } | undefined)?.value;
         const exported = statement.exported as { name?: string; value?: string } | null;
-        if (source)
+        if (source) {
           info.reexports.push({
             source,
             all: !exported,
             namespace: exported?.name ?? exported?.value,
           });
+        }
         break;
       }
       case "ExportDefaultDeclaration": {
@@ -575,8 +578,9 @@ function expandTypeRefs(declared: Map<string, ApiSymbol>, symbol: ApiSymbol, dep
     if (!target || target === symbol) continue;
     expandTypeRefs(declared, target, depth + 1);
     for (const member of target.members.values()) {
-      if (!symbol.members.has(member.key))
+      if (!symbol.members.has(member.key)) {
         symbol.members.set(member.key, { ...member, signatures: [...member.signatures] });
+      }
     }
   }
   symbol.typeRefs = undefined;
@@ -612,13 +616,14 @@ export function extractDtsSurface(index: PackageIndex, entryFile: string): ApiSu
 
     for (const [exported, local] of info.exported) {
       const symbol = info.declared.get(local);
-      if (symbol)
+      if (symbol) {
         result.set(exported, {
           ...symbol,
           name: exported,
           signatures: [...symbol.signatures],
           members: new Map(symbol.members),
         });
+      }
     }
     for (const reexport of info.reexports) {
       const target = resolveDts(path, reexport.source);
@@ -630,8 +635,9 @@ export function extractDtsSurface(index: PackageIndex, entryFile: string): ApiSu
       }
       const targetExports = resolveFile(target, depth + 1, stack);
       if (reexport.all) {
-        for (const [name, symbol] of targetExports)
+        for (const [name, symbol] of targetExports) {
           if (name !== "default" && !result.has(name)) result.set(name, symbol);
+        }
       } else if (reexport.names) {
         for (const { exported, imported } of reexport.names) {
           const symbol = targetExports.get(imported);

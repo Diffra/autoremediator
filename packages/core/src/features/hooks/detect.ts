@@ -128,8 +128,9 @@ export function detectManager(context: GitContext, requested?: HookManager): Man
     };
   }
   if (lefthook) return { manager: "lefthook", reason: `found ${lefthook}`, configFile: lefthook };
-  if (preCommit)
+  if (preCommit) {
     return { manager: "pre-commit", reason: `found ${preCommit}`, configFile: preCommit };
+  }
   return {
     manager: "git",
     reason: hooksPath

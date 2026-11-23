@@ -247,10 +247,11 @@ export function readPnpmLockfile(root: string, text: string): LockfileResult {
     const node = ensureNode(graph, name, versionText);
     if (node.manifestFiles.length === 0) {
       const directory = store.get(node.id);
-      if (directory)
+      if (directory) {
         node.manifestFiles.push(
           join(root, "node_modules", ".pnpm", directory, "node_modules", name, "package.json"),
         );
+      }
       const meta = metaOf.get(node.id);
       if (typeof meta?.deprecated === "string") node.deprecated = meta.deprecated;
       if (meta?.requiresBuild === true) node.hasInstallScript = true;
@@ -293,8 +294,11 @@ export function readPnpmLockfile(root: string, text: string): LockfileResult {
         const target = parsePnpmValue(name, value);
         if (!target) continue;
         const to = register(target.name, target.version).id;
-        if (graph.edges.some((edge) => edge.from === from && edge.to === to && edge.name === name))
+        if (
+          graph.edges.some((edge) => edge.from === from && edge.to === to && edge.name === name)
+        ) {
           continue;
+        }
         graph.edges.push({
           from,
           fromDirect: false,
@@ -354,18 +358,20 @@ export function readLockfile(root: string): {
   for (const lock of LOCKFILES) {
     const path = join(root, lock.file);
     if (!existsSync(path)) continue;
-    if (lock.format === "npm")
+    if (lock.format === "npm") {
       return {
         file: lock.file,
         format: "npm",
         result: readNpmLockfile(root, readFileSync(path, "utf8")),
       };
-    if (lock.format === "pnpm")
+    }
+    if (lock.format === "pnpm") {
       return {
         file: lock.file,
         format: "pnpm",
         result: readPnpmLockfile(root, readFileSync(path, "utf8")),
       };
+    }
     return {
       file: lock.file,
       format: lock.format,

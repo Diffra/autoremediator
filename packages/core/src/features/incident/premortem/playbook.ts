@@ -131,11 +131,12 @@ export function renderPlaybook(
     const used = report.packages.filter((entry) =>
       entry.usage.some((usage) => usage.repo === repo.label),
     );
-    if (used.length === 0)
+    if (used.length === 0) {
       out.push(
         "Nothing assessed is locked here; use the commands below if a package you did not list is reported.",
         "",
       );
+    }
     for (const entry of used) {
       const usage = entry.usage.find((candidate) => candidate.repo === repo.label)!;
       out.push(

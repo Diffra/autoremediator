@@ -96,8 +96,9 @@ export const resultFileSchema = z
       ctx.addIssue({ code: "custom", message: "summary does not match the task rows" });
     }
     const ids = file.tasks.map((task) => task.id);
-    if (new Set(ids).size !== ids.length)
+    if (new Set(ids).size !== ids.length) {
       ctx.addIssue({ code: "custom", message: "duplicate task id" });
+    }
     for (const task of file.tasks) {
       if (task.tokens && file.mode !== "agent-model") {
         ctx.addIssue({

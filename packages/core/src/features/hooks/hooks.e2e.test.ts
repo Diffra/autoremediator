@@ -69,8 +69,9 @@ const git = async (
   options: { cwd?: string; env?: Record<string, string> } = {},
 ): Promise<Run> => {
   const result = await run("git", args, options);
-  if (result.exitCode !== 0 && !options.env?.EXPECT_FAILURE)
+  if (result.exitCode !== 0 && !options.env?.EXPECT_FAILURE) {
     throw new Error(`git ${args.join(" ")} failed: ${result.stderr}`);
+  }
   return result;
 };
 

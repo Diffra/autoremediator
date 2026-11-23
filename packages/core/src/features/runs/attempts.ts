@@ -296,8 +296,9 @@ export async function verifyAttempt(
   const run = store.load(options.runId);
   const plan = store.readPlan(run.runId);
   const item = plan?.items.find((candidate) => candidate.itemId === record.itemId);
-  if (!plan || !item)
+  if (!plan || !item) {
     throw new Error(`Attempt ${record.attemptId} refers to a plan item that no longer exists.`);
+  }
 
   const before = loadSnapshot(join(store.attemptDir(run.runId, record.attemptId), "before"));
   const ad = deps.attemptDeps ?? defaultAttemptDeps;
@@ -351,10 +352,12 @@ export async function finalizeAttempt(
   const run = store.load(options.runId);
   const plan = store.readPlan(run.runId);
   const item = plan?.items.find((candidate) => candidate.itemId === record.itemId);
-  if (!plan || !item)
+  if (!plan || !item) {
     throw new Error(`Attempt ${record.attemptId} refers to a plan item that no longer exists.`);
-  if (!APPLICABLE_STATUSES.has(run.status))
+  }
+  if (!APPLICABLE_STATUSES.has(run.status)) {
     throw new Error(`Run ${run.runId} is ${run.status}; nothing can be finalized.`);
+  }
   // Earned autonomy (opt-in via the policy): below L2 nothing is put in the project.
   assertAutonomyAllows(cwd, plan.options.policy, "apply", `Finalizing attempt ${record.attemptId}`);
   const applied = appliedItems(store, run.runId);

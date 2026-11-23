@@ -204,8 +204,9 @@ export function extractFindings(report: ScanReport): VulnFinding[] {
   for (const r of report.reports) {
     const reachability = new Map<string, string>();
     for (const result of r.results) {
-      if (result.reachability?.status)
+      if (result.reachability?.status) {
         reachability.set(result.packageName, result.reachability.status);
+      }
     }
 
     for (const vulnerable of r.vulnerablePackages) {

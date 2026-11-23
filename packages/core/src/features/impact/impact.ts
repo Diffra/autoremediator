@@ -139,8 +139,9 @@ function uniqueSites(sites: CallSite[]): CallSite[] {
 function pseudoEntry(index: PackageIndex, subpath: string): EntryPoint | undefined {
   const known = index.entries.find((entry) => entry.subpath === subpath);
   if (known) return known;
-  if (index.source.manifest.exports !== undefined && index.source.manifest.exports !== null)
+  if (index.source.manifest.exports !== undefined && index.source.manifest.exports !== null) {
     return undefined;
+  }
   const relative = subpath.replace(/^\.\//, "");
   const file = index.resolveRelative("package.json", `./${relative}`);
   const base = relative.replace(/\.[cm]?js$/, "");
@@ -370,8 +371,9 @@ export function analyzeUpgrade(input: AnalyzeUpgradeInput): UpgradeImpact {
         !reach.compatible &&
         (usage.opaque.get(change.specifier)?.length ?? 0) > 0 &&
         change.severity === "breaking"
-      )
+      ) {
         opaqueBreaking++;
+      }
       countUnreached(change.severity);
       continue;
     }

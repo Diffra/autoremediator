@@ -209,12 +209,13 @@ export function registerMemoryCommands(program: Command): void {
     validateOutputFormat(opts.outputFormat, ["text", "json"], "memory accept");
     const { accepted, alreadyActive } = await acceptMemory({ cwd: opts.cwd, id });
     if (opts.outputFormat === "json") logJson({ accepted, alreadyActive });
-    else
+    else {
       out(
         alreadyActive
           ? `${accepted.id} was already in force.`
           : `Accepted ${accepted.id}: ${describeEntry(accepted)}`,
       );
+    }
   });
 
   common(memory.command("prune").description("Remove expired entries")).action(

@@ -108,8 +108,9 @@ export function createDefaultRemediationHandler(
       if (botPr) {
         if (typeof botPr.number !== "number" || !repoRef || !checkRun) return;
         // The webhook shows the head repository; the doctor checks again against the live pull request.
-        if (isForkPullRequest(botPr))
+        if (isForkPullRequest(botPr)) {
           return { status: "success", reason: "Pull request comes from a fork" };
+        }
         return runBotPrDoctor({
           octokit,
           owner: repoRef.owner,
@@ -609,8 +610,9 @@ async function prepareCommentRun(
   }
 
   // Remember the request before running it, so a run that fails can still be retried.
-  for (const id of command.advisoryIds)
+  for (const id of command.advisoryIds) {
     options.stateStore?.recordRemediationMode(modeKey(id), mode);
+  }
 
   return {
     run: {

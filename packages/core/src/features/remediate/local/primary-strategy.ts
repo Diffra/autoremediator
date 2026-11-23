@@ -119,8 +119,9 @@ export async function resolvePrimaryResult(params: {
       rejected: rejectedVersions,
     });
 
-    if (target.status === "memory-blocked")
+    if (target.status === "memory-blocked") {
       return { result: memoryBlocked(pkg, target, dryRun, vulnerable) };
+    }
 
     if (target.status === "no-safe-version") {
       return {
@@ -206,8 +207,9 @@ export async function resolvePrimaryResult(params: {
     rejected: rejectedVersions,
   });
 
-  if (target.status === "memory-blocked")
+  if (target.status === "memory-blocked") {
     return { result: memoryBlocked(pkg, target, dryRun, vulnerable) };
+  }
 
   if (target.status === "no-safe-version") {
     return {

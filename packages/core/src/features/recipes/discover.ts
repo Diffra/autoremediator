@@ -81,8 +81,9 @@ function jsonFiles(root: string): string[] {
         entry.isFile() &&
         entry.name.endsWith(".json") &&
         found.length < MAX_FILES_PER_SOURCE
-      )
+      ) {
         found.push(full);
+      }
     }
   };
   walk(root, 0);

@@ -80,15 +80,18 @@ export function describeBisect(report: BisectReport): string {
     );
   }
   for (const warning of report.warnings) lines.push(`Warning: ${warning}`);
-  if (report.stopped === "max-steps")
+  if (report.stopped === "max-steps") {
     lines.push(`Stopped at ${report.maxSteps} steps; raise --max-steps to narrow it further.`);
+  }
 
   const remedy = report.remedy;
   if (remedy) {
-    for (const pin of remedy.pins)
+    for (const pin of remedy.pins) {
       lines.push(`Pin back: ${pin.packageName}@${pin.version} (${pin.strategy})`);
-    for (const skipped of remedy.notPlanned)
+    }
+    for (const skipped of remedy.notPlanned) {
       lines.push(`Not planned: ${skipped.packageName}: ${skipped.reason}`);
+    }
     if (remedy.applied) {
       lines.push(
         `Applied through run ${remedy.runId}: ${remedy.applied.status}. ${remedy.applied.note}`,

@@ -97,8 +97,9 @@ export function mapRequestToInput(
     if (key in record) lifted[key] = record[key];
   }
   const clash = Object.keys(lifted).find((key) => key in options);
-  if (clash)
+  if (clash) {
     return { ok: false, error: `"${clash}" belongs at the top level, not under "options"` };
+  }
 
   return { ok: true, input: { ...options, ...lifted } };
 }

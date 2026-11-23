@@ -32,8 +32,9 @@ export async function reconcilePatchArtifacts(
   options: PatchReconcileOptions = {},
 ): Promise<PatchReconcileReport> {
   const cwd = options.cwd ?? process.cwd();
-  if (options.autoApply)
+  if (options.autoApply) {
     assertAutonomyAllows(cwd, undefined, "apply", "reconcilePatchArtifacts autoApply");
+  }
   const pm = options.packageManager ?? detectPackageManager(cwd);
 
   const summaries = await listPatchArtifacts(options);

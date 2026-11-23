@@ -119,8 +119,9 @@ function createTools(task: ReproductionTask, env: ReproductionEnv, state: AgentS
       }),
       execute: async ({ version, path, startLine, endLine }) => {
         const text = source(version).files.get(path);
-        if (text === undefined)
+        if (text === undefined) {
           return `Error: no file "${path}" in the ${version} version (use listFiles)`;
+        }
         const lines = text.split("\n");
         const from = Math.max(1, startLine ?? 1);
         const to = Math.min(

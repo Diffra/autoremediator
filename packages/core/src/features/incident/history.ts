@@ -101,8 +101,9 @@ async function git(cwd: string, args: string[], input?: string): Promise<string>
       ...(input === undefined ? {} : { input }),
     },
   );
-  if (result.exitCode !== 0)
+  if (result.exitCode !== 0) {
     throw new Error(`git ${args[0]} failed: ${result.stderr.split("\n")[0]}`);
+  }
   return result.stdout;
 }
 
@@ -205,8 +206,9 @@ function refSet(names: string[]): RefSet {
   for (const name of names) {
     if (name.startsWith("refs/tags/")) refs.tags.push(name.slice("refs/tags/".length));
     else if (name.startsWith("refs/heads/")) refs.branches.push(name.slice("refs/heads/".length));
-    else if (name.startsWith("refs/remotes/") && !name.endsWith("/HEAD"))
+    else if (name.startsWith("refs/remotes/") && !name.endsWith("/HEAD")) {
       refs.branches.push(name.slice("refs/remotes/".length));
+    }
   }
   return { branches: refs.branches.toSorted(), tags: refs.tags.toSorted() };
 }
@@ -252,8 +254,9 @@ export async function scanHistory(options: HistoryOptions): Promise<HistoryRepor
 
   const shallow = (await git(cwd, ["rev-parse", "--is-shallow-repository"])).trim() === "true";
   const notes: string[] = [];
-  if (shallow)
+  if (shallow) {
     notes.push("This is a shallow clone: history older than the clone depth is not available.");
+  }
 
   const lockPathspecs = [
     ...LOCKFILE_NAMES.map((name) => `:(glob)**/${name}`),
@@ -261,10 +264,11 @@ export async function scanHistory(options: HistoryOptions): Promise<HistoryRepor
   ];
   const { entries, commits } = await readLog(cwd, lockPathspecs, max);
   const truncated = commits >= max;
-  if (truncated)
+  if (truncated) {
     notes.push(
       `Only the newest ${max} commits that changed a lockfile were examined; older ones were not.`,
     );
+  }
   if (entries.some((entry) => entry.path.endsWith("bun.lockb"))) {
     notes.push(
       "bun.lockb (the binary bun lockfile) cannot be read; only the text bun.lock is analysed.",
@@ -349,10 +353,11 @@ export async function scanHistory(options: HistoryOptions): Promise<HistoryRepor
           const track = trackOf(entry.path, version);
           track.entered.unshift(entry.commit);
           // What the lockfile had right before this version first arrived.
-          if (track.entered.length === 1)
+          if (track.entered.length === 1) {
             track.previous = before
               .filter((other) => !isAffected(other, target.range))
               .toSorted(byVersionDesc);
+          }
         }
       }
       for (const version of before) {
@@ -426,8 +431,9 @@ export async function scanHistory(options: HistoryOptions): Promise<HistoryRepor
   for (const [blob, text] of await readBlobs(
     cwd,
     tipBlobs.filter((candidate) => !blobs.has(candidate)),
-  ))
+  )) {
     blobs.set(blob, text);
+  }
 
   for (const history of packages) {
     const target = targets.find((candidate) => candidate.name === history.packageName)!;

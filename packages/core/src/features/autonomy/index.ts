@@ -106,8 +106,9 @@ function stateOf(cwd: string, policy: string | undefined): State | undefined {
   try {
     return { config, events: readTrackRecord(cwd).events };
   } catch (error) {
-    if (error instanceof TrackRecordError)
+    if (error instanceof TrackRecordError) {
       return { config, events: [], recordError: error.message };
+    }
     throw error;
   }
 }

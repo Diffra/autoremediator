@@ -86,8 +86,9 @@ export function memoryTestCommand(
     if (
       ["run", "run-script"].includes(argv[verbAt] ?? "") &&
       typeof scripts[argv[verbAt + 1] ?? ""] !== "string"
-    )
+    ) {
       continue;
+    }
     if (argv[verbAt] === "task") continue; // deno tasks are not package.json scripts
     return argv;
   }

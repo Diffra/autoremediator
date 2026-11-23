@@ -128,8 +128,9 @@ function clearEarlierPack(outDir: string): void {
   for (const entry of entries as unknown[]) {
     const path = record(entry) ? entry["path"] : undefined;
     const digest = record(entry) ? entry["sha256"] : undefined;
-    if (typeof path !== "string" || typeof digest !== "string")
+    if (typeof path !== "string" || typeof digest !== "string") {
       throw notAPack("a file entry is malformed");
+    }
     const target = resolve(root, path);
     if (
       path === "" ||
@@ -156,8 +157,9 @@ function clearEarlierPack(outDir: string): void {
   const directories = new Set<string>();
   for (const path of removed) {
     rmSync(join(outDir, path), { force: true });
-    for (let dir = dirname(path); dir !== "." && dir !== "/"; dir = dirname(dir))
+    for (let dir = dirname(path); dir !== "." && dir !== "/"; dir = dirname(dir)) {
       directories.add(dir);
+    }
   }
   // Remove only the directories the pack itself made, deepest first, and only when nothing else is in them.
   for (const dir of [...directories].toSorted((a, b) => b.length - a.length)) {
@@ -171,8 +173,9 @@ function prepareOutDir(outDir: string): void {
     mkdirSync(outDir, { recursive: true });
     return;
   }
-  if (!statSync(outDir).isDirectory())
+  if (!statSync(outDir).isDirectory()) {
     throw new Error(`outDir "${outDir}" exists and is not a directory.`);
+  }
   const entries = readdirSync(outDir);
   if (entries.length === 0) return;
   if (!entries.includes("manifest.json")) {
@@ -374,8 +377,9 @@ export async function buildEvidencePack(
       ledgerHead: built.ledgerHead,
     });
   }
-  for (const skipped of skippedRuns)
+  for (const skipped of skippedRuns) {
     notes.push(`Run ${skipped.runId} has no attestation: ${skipped.reason}.`);
+  }
   if (key) {
     contents.set("attestations/signing-public-key.pem", {
       content: key.publicKeyPem,
@@ -390,8 +394,9 @@ export async function buildEvidencePack(
   contents.set("sbom/sbom.cdx.json", { content: jsonText(sbom.bom), kind: "sbom" });
   contents.set("vex/vex.cdx.json", { content: jsonText(cdxVex), kind: "vex" });
   contents.set("vex/vex.openvex.json", { content: jsonText(openVex), kind: "vex" });
-  for (const draft of drafts)
+  for (const draft of drafts) {
     contents.set(draft.path, { content: draft.content, kind: "cra-draft" });
+  }
 
   const result: EvidencePackResult = {
     schemaVersion: "1",
@@ -554,12 +559,14 @@ export function verifyEvidencePack(
     listed.add(entry.path);
     const full = join(dir, entry.path);
     if (!existsSync(full)) problems.push(`missing: ${entry.path}`);
-    else if (sha256(readFileSync(full)) !== entry.sha256)
+    else if (sha256(readFileSync(full)) !== entry.sha256) {
       problems.push(`changed: ${entry.path} no longer matches its sha256 in the manifest`);
+    }
   }
   for (const path of listFiles(dir)) {
-    if (path === "manifest.json" || PACK_STATEMENT_FILES.includes(path) || listed.has(path))
+    if (path === "manifest.json" || PACK_STATEMENT_FILES.includes(path) || listed.has(path)) {
       continue;
+    }
     problems.push(`unlisted: ${path} is not in the manifest`);
   }
 

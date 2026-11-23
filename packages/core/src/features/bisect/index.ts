@@ -98,10 +98,11 @@ function checkRef(name: string, value: string): void {
 
 async function resolveCommit(top: string, name: string, ref: string): Promise<string> {
   const result = await git(top, ["rev-parse", "--verify", "--end-of-options", `${ref}^{commit}`]);
-  if (!result.ok)
+  if (!result.ok) {
     throw new Error(
       `${name} ref ${JSON.stringify(ref)} does not resolve to a commit in this repository.`,
     );
+  }
   return result.stdout.trim();
 }
 
@@ -144,13 +145,15 @@ export async function bisectLockfile(
   checkRef("good", options.good);
   const badRef = options.bad?.trim() || "HEAD";
   checkRef("bad", badRef);
-  if (!options.command?.trim())
+  if (!options.command?.trim()) {
     throw new Error("command is required: the shell command that fails at the bad ref.");
+  }
   const timeoutSeconds = options.timeoutSeconds ?? DEFAULT_COMMAND_TIMEOUT_SECONDS;
   const maxSteps = options.maxSteps ?? DEFAULT_MAX_STEPS;
   if (!(timeoutSeconds > 0)) throw new Error("timeoutSeconds must be greater than zero.");
-  if (!Number.isInteger(maxSteps) || maxSteps < 1)
+  if (!Number.isInteger(maxSteps) || maxSteps < 1) {
     throw new Error("maxSteps must be a whole number of at least 1.");
+  }
   if (options.packageManager && !["npm", "pnpm", "yarn"].includes(options.packageManager)) {
     throw new Error(
       `bisect supports npm, pnpm and yarn (classic) lockfiles; ${options.packageManager} is not supported.`,
@@ -165,8 +168,9 @@ export async function bisectLockfile(
 
   const goodCommit = await resolveCommit(top, "good", options.good);
   const badCommit = await resolveCommit(top, "bad", badRef);
-  if (goodCommit === badCommit)
+  if (goodCommit === badCommit) {
     throw new Error("good and bad are the same commit: there is nothing to bisect.");
+  }
 
   // Which lockfile, hence which package manager.
   let lockfile: string | undefined;
@@ -201,8 +205,9 @@ export async function bisectLockfile(
     throw new Error("bisect reads yarn classic (v1) lockfiles only; this one is from yarn berry.");
   }
   const goodManifestText = await showAt(top, goodCommit, inRepo("package.json"));
-  if (goodManifestText === undefined)
+  if (goodManifestText === undefined) {
     throw new Error(`package.json does not exist at ${options.good}.`);
+  }
   const badManifest = parseManifest(await showAt(top, badCommit, inRepo("package.json")));
 
   const { updates, skipped } = lockfileChanges(
@@ -379,11 +384,12 @@ export async function bisectLockfile(
         signal,
       });
       const installRecord = record(argv.join(" "), install);
-      if (install.aborted)
+      if (install.aborted) {
         return done("unresolved", "install", tail(install.output, 600), {
           install: installRecord,
           note: "interrupted",
         });
+      }
       if (install.exitCode !== 0) {
         // An install that fails in a state taken from a commit is a broken build. In a combination
         // we made up it only says the combination cannot be installed.
@@ -435,12 +441,13 @@ export async function bisectLockfile(
         signal,
       });
       const runRecord = record(options.command, run);
-      if (run.aborted)
+      if (run.aborted) {
         return done("unresolved", "command", tail(run.output, 600), {
           install: installRecord,
           run: runRecord,
           note: "interrupted",
         });
+      }
       const passed = run.exitCode === 0;
       return done(passed ? "pass" : "fail", "command", tail(run.output, passed ? 400 : 1500), {
         install: installRecord,
@@ -487,10 +494,11 @@ export async function bisectLockfile(
     };
 
     const all = await attempt("all-updates", updates);
-    if (interrupted())
+    if (interrupted()) {
       return incomplete(
         "Interrupted while checking that the lockfile updates reproduce the failure.",
       );
+    }
     if (all !== "fail") {
       const last = steps.at(-1);
       return finish({
@@ -529,14 +537,15 @@ export async function bisectLockfile(
       (item) => `${item.packageName} ${item.fromVersion} -> ${item.toVersion}`,
     );
     if (!search.complete && culprits.length > 1) {
-      if (stopped === "max-steps")
+      if (stopped === "max-steps") {
         warnings.push(
           `Stopped at the limit of ${maxSteps} steps; raise maxSteps to narrow it further.`,
         );
-      else if (stopped === undefined)
+      } else if (stopped === undefined) {
         warnings.push(
           "Some combinations of versions could not be installed, so the set may not be minimal.",
         );
+      }
       return incomplete(
         `Narrowed ${updates.length} updates down to ${culprits.length} that still fail (${names.join("; ")}), but not to a minimal set.`,
         culprits,

@@ -97,11 +97,12 @@ export function publicModules(index: PackageIndex): PublicModule[] {
   const name = typeof manifestName === "string" ? manifestName : index.source.name;
   const modules = new Map<string, PublicModule>();
   for (const entry of index.entries) {
-    if (entry.file)
+    if (entry.file) {
       modules.set(specifierFor(name, entry.subpath), {
         specifier: specifierFor(name, entry.subpath),
         file: entry.file,
       });
+    }
   }
   const hasExportsMap =
     index.source.manifest.exports !== undefined && index.source.manifest.exports !== null;
@@ -109,8 +110,9 @@ export function publicModules(index: PackageIndex): PublicModule[] {
     const covered = new Set([...modules.values()].map((module) => module.file));
     let count = 0;
     for (const file of index.source.files.keys()) {
-      if (covered.has(file) || /\.d\.[cm]?ts$/.test(file) || SKIPPED_DIRECTORIES.test(file))
+      if (covered.has(file) || /\.d\.[cm]?ts$/.test(file) || SKIPPED_DIRECTORIES.test(file)) {
         continue;
+      }
       if (++count > MAX_DEEP_FILES) break;
       const stripped = file.replace(/\.[cm]?[jt]sx?$/, "");
       modules.set(`${name}/${stripped}`, { specifier: `${name}/${stripped}`, file });
@@ -336,11 +338,12 @@ function scoreCandidate(
           hintWords.has(token.toLowerCase()),
       )
       .slice(0, 3);
-    if (overlap.length > 0)
+    if (overlap.length > 0) {
       add(
         10 * overlap.length,
         `fix adds ${overlap.map((token) => `\`${token}\``).join(", ")}, which the advisory text mentions`,
       );
+    }
   }
 
   if (cweIds.length > 0) {
@@ -401,8 +404,9 @@ export function findVulnerableSymbols(
     for (const [name, def] of newLocals) {
       const previous = oldLocals.get(name);
       if (!previous) result.set(name, { change: "added", newDef: def });
-      else if (previous.fingerprint !== def.fingerprint)
+      else if (previous.fingerprint !== def.fingerprint) {
         result.set(name, { change: "changed", oldDef: previous, newDef: def });
+      }
     }
     for (const [name, def] of oldLocals) {
       if (!newLocals.has(name)) result.set(name, { change: "removed", oldDef: def });
@@ -430,8 +434,9 @@ export function findVulnerableSymbols(
     const newExports = newModule
       ? newIndex.exportsOf(newModule.file)
       : new Map<string, ResolvedExport>();
-    if (newModule && newIndex.module(newModule.file)?.discovery === "namespace-assignments")
+    if (newModule && newIndex.module(newModule.file)?.discovery === "namespace-assignments") {
       weakDiscovery = true;
+    }
 
     const symbolFor = (exportName: string, file: string): string =>
       (exportName === "default" || exportName === "module.exports") && specifier.includes("/")
@@ -487,8 +492,9 @@ export function findVulnerableSymbols(
           if (
             changedTokens.length > 0 &&
             changedTokens.every((token) => /^\d+\.\d+\.\d+/.test(token))
-          )
+          ) {
             continue;
+          }
         }
       } else {
         // Breadth-first through the definitions this export refers to, in its own module.
@@ -503,9 +509,11 @@ export function findVulnerableSymbols(
             visited.add(name);
             if (localChanges.has(name)) hits.push(name);
             const def = newMod?.locals.get(name);
-            if (def)
-              for (const ref of def.refs)
-                if (newMod?.locals.has(ref) && !visited.has(ref)) next.push(ref);
+            for (const ref of def?.refs ?? []) {
+              if (newMod?.locals.has(ref) && !visited.has(ref)) {
+                next.push(ref);
+              }
+            }
           }
           if (hits.length > 0) {
             basis = "via-internal-function";

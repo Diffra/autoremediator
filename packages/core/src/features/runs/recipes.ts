@@ -88,10 +88,11 @@ export function recipeFromAttempt(
 ): { recipe: Recipe; skipped: { file: string; reason: string }[] } | { error: string } {
   const fromRange = input.fromRange ?? rangeAround(input.fromVersion);
   const toRange = input.toRange ?? rangeAround(input.toVersion);
-  if (!fromRange || !toRange)
+  if (!fromRange || !toRange) {
     return {
       error: `cannot make a version range from ${input.fromVersion} and ${input.toVersion}`,
     };
+  }
   try {
     return captureRecipe({
       diff: input.diff,

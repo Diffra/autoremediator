@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 /**
- * The readability rules in `.oxlintrc.json` (braces, nested ternaries, file and function length)
+ * The readability rules in `.oxlintrc.json` (nested ternaries, file and function length)
  * are switched off for the files that predate them, listed in override blocks. That list is a
  * ratchet: it may only shrink. When you fix a file, delete its path there and lower the cap below.
  */
@@ -15,7 +15,6 @@ const CAPS: Record<string, number> = {
   "eslint/max-lines": 28,
   "eslint/max-lines-per-function": 93,
   "eslint/no-nested-ternary": 69,
-  "eslint/curly": 98,
 };
 
 interface Override {

@@ -337,8 +337,9 @@ function summarise(
   report: FreshnessReport,
 ): string {
   if (status === "nothing-to-do") {
-    if (!report.policy)
+    if (!report.policy) {
       return "The policy has no `freshness` key, so there is no limit to climb towards.";
+    }
     return report.climbs.length === 0
       ? "Every direct dependency is within the freshness policy."
       : "Every step that is due is held; see stopped.";
@@ -364,8 +365,9 @@ async function openChangeRequest(
     });
     if (result) {
       outcome.changeRequest = result;
-      if (result.error)
+      if (result.error) {
         outcome.message = `${outcome.message} Change request not created: ${result.error}`;
+      }
     }
   } catch (error) {
     outcome.message = `${outcome.message} Change request not created: ${errorMessage(error)}`;

@@ -113,8 +113,9 @@ export async function incident(
       for (const entry of packages) {
         const range = inRange(entry.packageName, entry.range);
         const copies = installed.filter((copy) => range(copy.name, copy.version));
-        if (copies.length > 0)
+        if (copies.length > 0) {
           entry.installed = copies.map((copy) => ({ version: copy.version, type: copy.type }));
+        }
       }
     } catch {
       notes.push(

@@ -326,8 +326,9 @@ describe("size bound and expiry", () => {
 
   it("never evicts a person's entries, and says the file is full", () => {
     let doc = parseDocument("");
-    for (let index = 0; index < 200; index += 1)
+    for (let index = 0; index < 200; index += 1) {
       doc = addToDocument(doc, note(`fact ${index}`), NOW).doc;
+    }
     expect(() => addToDocument(doc, note("one more"), NOW)).toThrow(MemoryFullError);
     expect(() => addToDocument(doc, note("auto", { source: RUN }), NOW)).toThrow(MemoryFullError);
   });

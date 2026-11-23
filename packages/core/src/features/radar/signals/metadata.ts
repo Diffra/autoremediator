@@ -46,8 +46,9 @@ export function metadataFlags(
   // on many versions is a single signal: it is reported once, at the first release it leads to.
   const noticed = new Map<string, { flag: RadarFlag; count: number }>();
   for (const [index, entry] of ordered.entries()) {
-    if (!entry.deprecated || semver.lt(entry.version, from) || semver.gte(entry.version, to))
+    if (!entry.deprecated || semver.lt(entry.version, from) || semver.gte(entry.version, to)) {
       continue;
+    }
     if (!mentionsSecurity(entry.deprecated)) continue;
     const successor = ordered[index + 1];
     if (!successor || semver.gt(successor.version, to)) continue;

@@ -193,11 +193,12 @@ export function compareSignatures(
 }
 
 function shapeOf(symbol: ApiSymbol): string {
-  if (symbol.kind === "function")
+  if (symbol.kind === "function") {
     return `function:${symbol.signatures
       .map((s) => s.text)
       .toSorted()
       .join("|")}`;
+  }
   if (
     symbol.kind === "class" ||
     symbol.kind === "interface" ||

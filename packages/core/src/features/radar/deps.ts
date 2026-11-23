@@ -243,22 +243,27 @@ function createGithubFetcher(): RadarDeps["fetchGithubReleases"] {
         exhausted = `GitHub rate limit reached${
           Number.isFinite(reset) ? ` (resets ${new Date(reset * 1000).toISOString()})` : ""
         }; release notes were not read for the remaining packages`;
-        if (response.status === 403 || response.status === 429)
+        if (response.status === 403 || response.status === 429) {
           return { releases: [], note: exhausted };
+        }
       } else if (Number.isFinite(remaining) && remaining <= 2) {
         exhausted =
           "GitHub rate limit nearly spent; release notes were not read for the remaining packages";
       }
-      if (response.status === 404)
+      if (response.status === 404) {
         return { releases: [], note: `${owner}/${repo} has no releases on GitHub` };
-      if (!response.ok)
+      }
+      if (!response.ok) {
         return { releases: [], note: `GitHub answered ${response.status} for ${owner}/${repo}` };
+      }
       const declared = Number.parseInt(response.headers.get("content-length") ?? "", 10);
-      if (declared > GITHUB_MAX_BYTES)
+      if (declared > GITHUB_MAX_BYTES) {
         return { releases: [], note: `GitHub releases for ${owner}/${repo} are too large` };
+      }
       const text = await response.text();
-      if (text.length > GITHUB_MAX_BYTES)
+      if (text.length > GITHUB_MAX_BYTES) {
         return { releases: [], note: `GitHub releases for ${owner}/${repo} are too large` };
+      }
       const parsed: unknown = JSON.parse(text);
       if (!Array.isArray(parsed)) return { releases: [] };
       const releases = parsed.flatMap((entry: unknown) => {

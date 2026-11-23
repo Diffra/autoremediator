@@ -175,8 +175,9 @@ function inCodeSpan(context: LineContext, index: number): boolean {
 function joinedToName(text: string, start: number, end: number): boolean {
   const before = text[start - 1];
   const after = text[end];
-  if (before === "@" || before === "/" || after === "/" || before === "_" || after === "_")
+  if (before === "@" || before === "/" || after === "/" || before === "_" || after === "_") {
     return true;
+  }
   const wordChar = /[a-z0-9]/i;
   if (before === "-" && wordChar.test(text[start - 2] ?? "")) return true;
   if (after === "-" && wordChar.test(text[end + 1] ?? "")) return true;

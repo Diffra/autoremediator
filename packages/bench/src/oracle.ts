@@ -153,8 +153,9 @@ export function manifestProblems(baseline: unknown, current: unknown, target: st
     if (isObject(left) && isObject(right)) {
       // Name the entries that differ ("scripts.test"), not just the field.
       for (const name of [...new Set([...Object.keys(left), ...Object.keys(right)])].toSorted()) {
-        if (canonical(left[name]) !== canonical(right[name]))
+        if (canonical(left[name]) !== canonical(right[name])) {
           problems.push(`${key}.${name} changed`);
+        }
       }
     } else {
       problems.push(`${key} changed`);
@@ -373,10 +374,11 @@ export async function judge(
   if (fixed) outcome = "fixed";
   else if (observed.claimedSuccess) outcome = "false-claim";
   else if (!unchanged) outcome = "broken";
-  else
+  else {
     outcome = observed.unresolvedReasons.some((r) => REFUSAL_REASONS.has(r))
       ? "refused"
       : "unresolved";
+  }
 
   return { score: pass ? "PASS" : "FAIL", outcome, checks, changedFiles: changed.length };
 }

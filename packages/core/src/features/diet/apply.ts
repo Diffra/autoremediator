@@ -44,8 +44,9 @@ export function removeCommand(
 ): string[] {
   // Names come from package.json keys; one that looks like an option must never reach the package manager.
   for (const name of names) {
-    if (!PACKAGE_NAME.test(name))
+    if (!PACKAGE_NAME.test(name)) {
       throw new Error(`Refusing to remove "${name.slice(0, 60)}": not a valid package name.`);
+    }
   }
   if (packageManager === "pnpm") {
     // `--ignore-scripts`: removing a package must not run anyone's lifecycle scripts.
@@ -85,12 +86,13 @@ export const defaultDietDeps: DietDeps = {
     const [command, ...args] = resolveInstallCommand(packageManager, {
       enforceFrozenLockfile: true,
     });
-    if (command)
+    if (command) {
       await safeExeca(command, args, {
         cwd: root,
         stdio: "pipe",
         timeoutMs: LONG_RUNNING_TIMEOUT_MS,
       });
+    }
   },
   verify,
 };

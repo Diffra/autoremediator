@@ -274,8 +274,9 @@ export async function runRepairAttempt(
           problems: [{ file: "(recipes)", error: errorMessage(error) }],
         };
       }
-      for (const problem of found.problems)
+      for (const problem of found.problems) {
         transcript.push({ step: 0, text: `recipe ${problem.file}: unusable: ${problem.error}` });
+      }
       let trial: Awaited<ReturnType<typeof tryRecipes>>;
       try {
         trial = await tryRecipes({ checkout: checkout.path, recipes: found.recipes, judge });
@@ -309,8 +310,9 @@ export async function runRepairAttempt(
 
     while (!verification.passed && rounds < budget.maxRepairRounds) {
       if (!agent) break; // unreachable: without an agent the block above has already returned
-      if (request.signal.aborted)
+      if (request.signal.aborted) {
         return fail("rejected", "the attempt was cancelled", rounds, verification);
+      }
       const spent = sum(usage, "inputTokens") + sum(usage, "outputTokens");
       if (budget.maxTotalTokens !== undefined && spent >= budget.maxTotalTokens) {
         return fail("rejected", "the token budget was used up", rounds, verification);

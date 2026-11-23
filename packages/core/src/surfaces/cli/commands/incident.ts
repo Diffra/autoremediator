@@ -55,8 +55,9 @@ export async function runIncident(target: string, opts: IncidentCliOptions): Pro
   if (opts.outputFormat === "json") logJson(report);
   else {
     process.stdout.write(renderIncidentMarkdown(report));
-    if (report.files)
+    if (report.files) {
       process.stdout.write(`\nWrote ${report.files.markdown} and ${report.files.json}\n`);
+    }
   }
   // 0 clear, 3 it was in history but is not locked now, 4 it is locked or installed now.
   process.exitCode = incidentExitCode(report);
@@ -71,8 +72,9 @@ function readTargets(path: string): PremortemTarget[] {
       cause: error,
     });
   }
-  if (!Array.isArray(parsed))
+  if (!Array.isArray(parsed)) {
     throw new Error("Targets file must be a JSON array, as for `portfolio`.");
+  }
   const targets: PremortemTarget[] = [];
   for (const [index, entry] of parsed.entries()) {
     const record =
@@ -101,15 +103,16 @@ function describePremortem(report: PremortemReport): string {
     );
   }
   for (const note of report.notes) lines.push(`  note: ${note}`);
-  if (report.files)
+  if (report.files) {
     lines.push(`Wrote ${report.files.length} file(s):`, ...report.files.map((file) => `  ${file}`));
-  else lines.push("Pass --output-dir to write the playbooks.");
+  } else lines.push("Pass --output-dir to write the playbooks.");
   return `${lines.join("\n")}\n`;
 }
 
 export async function runPremortem(opts: PremortemCliOptions): Promise<void> {
-  if (!opts.targetsFile && !opts.root)
+  if (!opts.targetsFile && !opts.root) {
     throw new Error("Give --targets-file <json> or --root <dir>.");
+  }
   const report = await premortem({
     ...(opts.targetsFile ? { targets: readTargets(opts.targetsFile) } : {}),
     ...(opts.root ? { root: opts.root } : {}),

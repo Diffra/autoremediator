@@ -25,8 +25,9 @@ export async function planTask(context: ModeContext): Promise<PlannedTask> {
     runTests: true,
     typecheck: true,
   });
-  if (!report.runId)
+  if (!report.runId) {
     throw new Error(`planRemediation recorded no run for ${task.id}: ${report.summary}`);
+  }
 
   const reasons = report.results.flatMap((result) =>
     result.unresolvedReason ? [result.unresolvedReason] : [],

@@ -66,8 +66,9 @@ function staticSpecifier(node: unknown): string | undefined {
   if (node.type === "TemplateLiteral") {
     const quasis = node.quasis as { value?: { cooked?: string } }[] | undefined;
     const expressions = node.expressions as unknown[] | undefined;
-    if (quasis?.length === 1 && (expressions?.length ?? 0) === 0)
+    if (quasis?.length === 1 && (expressions?.length ?? 0) === 0) {
       return quasis[0]?.value?.cooked ?? undefined;
+    }
   }
   return undefined;
 }
@@ -107,8 +108,9 @@ function addReference(
   }
   reference.kinds.add(kind);
   for (const symbol of symbols) reference.symbols.add(symbol);
-  if (reference.files.length < MAX_EVIDENCE_FILES && !reference.files.includes(file))
+  if (reference.files.length < MAX_EVIDENCE_FILES && !reference.files.includes(file)) {
     reference.files.push(file);
+  }
 }
 
 function addMention(usage: PackageUsage, name: string, file: string): void {
@@ -290,9 +292,9 @@ export function scanSource(
         else if (isNode(init) && init.type === "ImportExpression") {
           handled.add(init);
           const specifier = staticSpecifier(init.source);
-          if (specifier !== undefined)
+          if (specifier !== undefined) {
             addReference(usage, specifier, "dynamic-import", patternSymbols(node.id), path);
-          else if (!looksRelative(init.source)) dynamic = true;
+          } else if (!looksRelative(init.source)) dynamic = true;
         }
         break;
       }
@@ -376,8 +378,9 @@ export function tokensOf(text: string): string[] {
     let token = raw
       .replace(/^(\.\/)?(node_modules\/(\.bin\/)?)+/, "")
       .replaceAll(/^[.:+-]+|[.:+-]+$/g, "");
-    if (token.startsWith("plugin:") || token.startsWith("npm:"))
+    if (token.startsWith("plugin:") || token.startsWith("npm:")) {
       token = token.slice(token.indexOf(":") + 1);
+    }
     if (!token || /^[./]/.test(token) || token.length > 214) continue;
     tokens.add(token);
     // npx name@version
@@ -413,8 +416,9 @@ export function scanPackage(
     if (file.role === "script") into.sourceFiles += 1;
     if (file.role === "config" || file.role === "script") {
       into.configFiles += 1;
-      for (const token of tokensOf(text))
+      for (const token of tokensOf(text)) {
         if (!into.tokens.has(token)) into.tokens.set(token, file.path);
+      }
     }
   }
   return { usage: into, files };

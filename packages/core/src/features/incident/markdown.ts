@@ -116,16 +116,18 @@ export function renderIncidentMarkdown(report: IncidentReport): string {
       "| --- | --- | --- | --- | --- | --- |",
     );
     for (const entry of exposure.packages) {
-      for (const occurrence of entry.occurrences)
+      for (const occurrence of entry.occurrences) {
         out_(occurrenceRow(entry.packageName, occurrence));
+      }
     }
     out_("");
   } else {
     out_("No affected version is in the lockfiles.", "");
   }
   for (const entry of exposure.packages) {
-    if (entry.declared)
+    if (entry.declared) {
       out_(`- ${code(entry.packageName)} is declared in package.json as ${code(entry.declared)}.`);
+    }
     if (entry.installed && entry.installed.length > 0) {
       out_(
         `- Installed in node_modules: ${entry.installed.map((copy) => code(`${entry.packageName}@${copy.version}`)).join(", ")}.`,
@@ -148,8 +150,9 @@ export function renderIncidentMarkdown(report: IncidentReport): string {
     );
     for (const entry of report.history.packages) {
       out_(`### ${code(entry.packageName)}`, "");
-      if (entry.windows.length === 0)
+      if (entry.windows.length === 0) {
         out_("No affected version appears in the lockfile history.", "");
+      }
       for (const window of entry.windows) out_(...windowLines(window));
       if (entry.windows.length > 0) out_("");
       if (entry.manifestChanges.length > 0) {
@@ -163,10 +166,11 @@ export function renderIncidentMarkdown(report: IncidentReport): string {
       }
     }
     for (const note of report.history.notes) out_(`- ${prose(note)}`);
-    if (report.history.unreadable > 0)
+    if (report.history.unreadable > 0) {
       out_(
         `- ${report.history.unreadable} lockfile version(s) could not be read and are not counted.`,
       );
+    }
     out_("");
   }
 
@@ -238,16 +242,18 @@ export function renderIncidentMarkdown(report: IncidentReport): string {
       }
     }
     for (const file of secrets.containers) {
-      if (file.installs)
+      if (file.installs) {
         out_(`- ${code(file.file)} installs dependencies while building an image.`);
+      }
     }
     for (const file of secrets.npmrc) {
       out_(
         `- ${code(file.file)}: ${file.envNames.length > 0 ? `reads ${list(file.envNames)}` : "no token variable"}${file.literalCredential ? "; **a credential is written into the file itself**" : ""}.`,
       );
     }
-    for (const file of secrets.lifecycle)
+    for (const file of secrets.lifecycle) {
       out_(`- ${code(file.file)} defines install-time scripts: ${list(file.scripts)}.`);
+    }
     out_("");
     out_("Generic steps:", "");
     for (const item of secrets.guidance) out_(`- [ ] ${item.text}`);

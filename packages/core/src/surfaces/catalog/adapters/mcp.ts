@@ -131,8 +131,9 @@ export async function callMcpOperation(
       getAllowedRoots(options.env, options.clientRoots),
     );
   } catch (err) {
-    if (err instanceof PathNotAllowedError)
+    if (err instanceof PathNotAllowedError) {
       return errorResult(JSON.stringify({ error: err.message }));
+    }
     throw err;
   }
 
@@ -143,8 +144,9 @@ export async function callMcpOperation(
     } catch (err) {
       return errorResult(errorMessage(err));
     }
-    if (!approved)
+    if (!approved) {
       return errorResult(`${operation.title} was declined by the user; nothing was changed.`);
+    }
   }
 
   try {

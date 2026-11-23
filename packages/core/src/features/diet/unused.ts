@@ -60,8 +60,9 @@ const STRUCTURAL_FIELDS = new Set([
 /** The manifest fields a tool reads its configuration from (`eslintConfig`, `jest`, `babel`, ...). */
 export function manifestConfigText(manifest: Manifest): string {
   const config: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(manifest))
+  for (const [key, value] of Object.entries(manifest)) {
     if (!STRUCTURAL_FIELDS.has(key)) config[key] = value;
+  }
   return JSON.stringify(config);
 }
 
@@ -134,8 +135,9 @@ export function candidatePackages(token: string): string[] {
       names.add(`${scope}/eslint-plugin`);
       names.add(`${scope}/eslint-config`);
     } else if (scope) {
-      for (const suffix of ["eslint-plugin", "eslint-config", "babel-preset", "prettier-config"])
+      for (const suffix of ["eslint-plugin", "eslint-config", "babel-preset", "prettier-config"]) {
         names.add(`${scope}/${suffix}`);
+      }
     }
   } else {
     for (const prefix of [
@@ -169,8 +171,9 @@ export interface TokenIndex {
 export function indexTokens(tokens: ReadonlyMap<string, string>): TokenIndex {
   const candidates = new Map<string, string>();
   for (const [token, where] of tokens) {
-    for (const name of candidatePackages(token))
+    for (const name of candidatePackages(token)) {
       if (!candidates.has(name)) candidates.set(name, where);
+    }
   }
   return { candidates, raw: tokens };
 }

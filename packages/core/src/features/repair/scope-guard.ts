@@ -52,8 +52,9 @@ export class ScopeGuard {
     if (rel === ".git" || rel.startsWith(".git/") || rel.startsWith(".autoremediator/")) {
       throw new ScopeViolation(`"${rel}" is not readable`);
     }
-    if (SECRET_NAMES.test(name))
+    if (SECRET_NAMES.test(name)) {
       throw new ScopeViolation(`"${rel}" may hold credentials and is not readable`);
+    }
     return full;
   }
 

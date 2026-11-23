@@ -109,8 +109,9 @@ export function renderFreshnessReport(report: FreshnessReport): string {
     );
     for (const climb of report.climbs) lines.push(climbLine(climb));
   }
-  for (const entry of report.unplanned)
+  for (const entry of report.unplanned) {
     lines.push("", `Not planned: ${entry.packageName}: ${entry.reason}`);
+  }
   for (const note of report.notes) lines.push("", `Note: ${note}`);
   return `${lines.join("\n")}\n`;
 }
@@ -166,8 +167,9 @@ function renderApply(result: ApplyFreshnessResult): string {
       );
     }
   }
-  for (const entry of result.stopped)
+  for (const entry of result.stopped) {
     lines.push(`  stopped: ${entry.packageName}: ${brief(entry.reason, 1)}`);
+  }
   if (result.remaining.length > 0) lines.push(`  still to do: ${result.remaining.join(", ")}`);
   return `${lines.join("\n")}\n`;
 }
@@ -304,8 +306,9 @@ export function registerFreshnessCommands(program: Command): void {
           opts.model ? "--model" : "",
           opts.createChangeRequest ? "--create-change-request" : "",
         ].filter(Boolean);
-        if (misplaced.length > 0)
+        if (misplaced.length > 0) {
           throw new Error(`${misplaced.join(", ")} only apply with --plan or --apply.`);
+        }
       }
       if (opts.apply && opts.assess === false) {
         throw new Error(

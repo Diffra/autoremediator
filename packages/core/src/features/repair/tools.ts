@@ -47,8 +47,9 @@ export function hasNestedQuantifier(pattern: string): boolean {
       index += 2;
     } else if (char === "[") {
       index++;
-      while (index < pattern.length && pattern[index] !== "]")
+      while (index < pattern.length && pattern[index] !== "]") {
         index += pattern[index] === "\\" ? 2 : 1;
+      }
       index++;
     } else if (char === "(") {
       groups.push(false);
@@ -184,8 +185,9 @@ export function createRepairTools(context: RepairToolContext): ToolSet {
       execute: async ({ path, startLine, endLine }) => {
         try {
           const full = guard.assertReadable(path);
-          if (!existsSync(full) || !statSync(full).isFile())
+          if (!existsSync(full) || !statSync(full).isFile()) {
             return `Error: "${path}" is not a file`;
+          }
           const lines = readFileSync(full, "utf8").split("\n");
           const from = Math.max(1, startLine ?? 1);
           const to = Math.min(
@@ -334,13 +336,15 @@ export function createRepairTools(context: RepairToolContext): ToolSet {
       execute: async ({ path, oldText, newText }) => {
         try {
           const full = guard.assertWritable(path);
-          if (!existsSync(full))
+          if (!existsSync(full)) {
             return `Error: "${path}" does not exist (use writeFile to create a file)`;
+          }
           const text = readFileSync(full, "utf8");
           const first = text.indexOf(oldText);
           if (first === -1) return `Error: oldText was not found in "${path}"`;
-          if (text.indexOf(oldText, first + 1) !== -1)
+          if (text.indexOf(oldText, first + 1) !== -1) {
             return `Error: oldText appears more than once in "${path}"; include more context`;
+          }
           const next = text.slice(0, first) + newText + text.slice(first + oldText.length);
           if (next.length > MAX_WRITE_BYTES) return "Error: the file would become too large";
           writeFileSync(full, next, "utf8");
@@ -376,8 +380,9 @@ export function createRepairTools(context: RepairToolContext): ToolSet {
       inputSchema: z.object({ name: z.enum(["typecheck", "tests", "build"]) }),
       execute: async ({ name }) => {
         const command = commands[name];
-        if (!command || command.length === 0)
+        if (!command || command.length === 0) {
           return `No ${name} command is configured for this project.`;
+        }
         if (state.commandRuns >= budget.maxCommandRuns) {
           return `Command limit reached (${budget.maxCommandRuns}). Submit, or give up.`;
         }

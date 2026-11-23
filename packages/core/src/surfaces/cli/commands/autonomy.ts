@@ -57,15 +57,15 @@ function printStatus(status: AutonomyStatus): void {
   if (status.cap) out(`Cap: ${status.cap.reason}`);
   const next = status.nextPromotion;
   if (next) {
-    if (next.blockedByCeiling)
+    if (next.blockedByCeiling) {
       out(
         `Next: ${next.to} is above the policy ceiling ${status.ceiling}; raise the ceiling in the policy file to allow it`,
       );
-    else if (next.requirements.length === 0)
+    } else if (next.requirements.length === 0) {
       out(
         `Next: ${next.to} once the cooldown ends${next.cappedUntil ? ` (${next.cappedUntil})` : ""}`,
       );
-    else {
+    } else {
       out(`Next: ${next.to} needs`);
       for (const requirement of next.requirements) {
         out(

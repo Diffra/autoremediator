@@ -345,8 +345,13 @@ function scanFile(index: UsageIndex, file: string, code: string): void {
 
     // Declarations and property names are not uses.
     if (parent.type === "VariableDeclarator" && parent.id === node) return true;
-    if (parent.type === "MemberExpression" && parent.property === node && parent.computed !== true)
+    if (
+      parent.type === "MemberExpression" &&
+      parent.property === node &&
+      parent.computed !== true
+    ) {
       return true;
+    }
     if (
       (parent.type === "Property" ||
         parent.type === "MethodDefinition" ||
@@ -360,14 +365,16 @@ function scanFile(index: UsageIndex, file: string, code: string): void {
     if (
       (parent.type === "FunctionDeclaration" || parent.type === "ClassDeclaration") &&
       parent.id === node
-    )
+    ) {
       return true;
+    }
     if (
       parent.type === "ImportSpecifier" ||
       parent.type === "ImportDefaultSpecifier" ||
       parent.type === "ImportNamespaceSpecifier"
-    )
+    ) {
       return true;
+    }
 
     const grand = ancestors.at(-2);
     const exportName = binding.mode === "named" ? (binding.name ?? "default") : "default";

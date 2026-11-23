@@ -36,8 +36,9 @@ export async function remediate(
   const normalizedCveId = cveId.toUpperCase();
   const cwd = options.cwd ?? process.cwd();
   // Earned autonomy (opt-in via the policy): below L2 nothing may be changed.
-  if (!options.dryRun && !options.preview)
+  if (!options.dryRun && !options.preview) {
     assertAutonomyAllows(cwd, options.policy, "apply", "remediate");
+  }
   const constraints = resolveConstraints(options, cwd);
   const provenance = resolveProvenanceContext(options);
   const correlation = resolveCorrelationContext(options);

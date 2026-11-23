@@ -258,8 +258,9 @@ export async function addMemory(
 export async function removeMemory(cwd: string, id: string): Promise<MemoryEntry> {
   return change(cwd, (doc) => {
     const { doc: next, removed } = removeFromDocument(doc, id);
-    if (!removed)
+    if (!removed) {
       throw new MemoryFileError(`No memory entry ${id}. See \`autoremediator memory list\`.`);
+    }
     return { doc: next, result: removed };
   });
 }
@@ -270,8 +271,9 @@ export async function acceptMemory(
 ): Promise<{ entry: MemoryEntry; alreadyActive: boolean }> {
   return change(cwd, (doc) => {
     const { doc: next, accepted, alreadyActive } = acceptInDocument(doc, id);
-    if (!accepted)
+    if (!accepted) {
       throw new MemoryFileError(`No memory entry ${id}. See \`autoremediator memory list\`.`);
+    }
     return { doc: next, result: { entry: accepted, alreadyActive } };
   });
 }

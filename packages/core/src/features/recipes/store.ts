@@ -23,12 +23,14 @@ export function recipeFileName(recipe: Recipe): string {
 
 /** `<root>/<package>/<file>`, refusing anything that resolves outside `root`. */
 function insideRoot(root: string, packageName: string, fileName: string): string {
-  if (!NPM_PACKAGE_NAME.test(packageName))
+  if (!NPM_PACKAGE_NAME.test(packageName)) {
     throw new Error(`not a package name: ${JSON.stringify(packageName)}`);
+  }
   const target = resolve(root, ...packageName.split("/"), fileName);
   const rel = relative(resolve(root), target);
-  if (rel.startsWith("..") || resolve(root, rel) !== target)
+  if (rel.startsWith("..") || resolve(root, rel) !== target) {
     throw new Error("the recipe path escapes its directory");
+  }
   return target;
 }
 
@@ -49,12 +51,13 @@ export function saveProjectRecipe(projectDir: string, recipe: Recipe): SavedReci
   if (existing) return { id, path: join(projectDir, existing.file), created: false };
 
   let path = insideRoot(root, recipe.package, recipeFileName(recipe));
-  if (existsSync(path))
+  if (existsSync(path)) {
     path = insideRoot(
       root,
       recipe.package,
       `${recipeFileName(recipe).replace(/\.json$/, "")}-${id.split("#")[1]}.json`,
     );
+  }
   mkdirSync(dirname(path), { recursive: true });
   writeFileSync(path, serializeRecipe(recipe), { encoding: "utf8", flag: "wx" });
   return { id, path, created: true };
@@ -82,11 +85,13 @@ export interface ExportResult {
  * how to use it, and `recipes/<package>/<file>.json`. Nothing is published.
  */
 export function exportRecipePackage(options: ExportOptions): ExportResult {
-  if (!NPM_PACKAGE_NAME.test(options.name))
+  if (!NPM_PACKAGE_NAME.test(options.name)) {
     throw new Error(`"${options.name}" is not a valid npm package name`);
+  }
   const version = options.version ?? "0.1.0";
-  if (!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(version))
+  if (!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(version)) {
     throw new Error(`"${version}" is not a valid version`);
+  }
 
   const outDir = resolve(options.outDir);
   if (existsSync(outDir) && readdirSync(outDir).length > 0) {
@@ -116,8 +121,9 @@ export function exportRecipePackage(options: ExportOptions): ExportResult {
   const used = new Set<string>();
   for (const entry of recipes.toSorted((a, b) => (a.id < b.id ? -1 : 1))) {
     let name = recipeFileName(entry.recipe);
-    if (used.has(`${entry.recipe.package}/${name}`))
+    if (used.has(`${entry.recipe.package}/${name}`)) {
       name = `${name.replace(/\.json$/, "")}-${entry.id.split("#")[1]}.json`;
+    }
     used.add(`${entry.recipe.package}/${name}`);
     write(`${PACKAGE_RECIPES_DIR}/${entry.recipe.package}/${name}`, serializeRecipe(entry.recipe));
   }

@@ -123,8 +123,9 @@ function aggregate(
           privileged: false,
         };
         entry.repos.add(scan.repo.label);
-        for (const parent of parents.get(node.id) ?? [])
+        for (const parent of parents.get(node.id) ?? []) {
           entry.dependents.add(graph.nodes.get(parent)?.name ?? parent);
+        }
         if (node.installScript) entry.privileged = true;
         else if (
           rankBy === "privileged" &&
@@ -234,8 +235,9 @@ export async function premortem(options: PremortemOptions): Promise<PremortemRep
         const hits = findOccurrences(graph, (name) => name === packageName);
         const parents = reverseEdges(graph);
         for (const occurrence of hits) {
-          for (const parent of parents.get(occurrence.nodeId) ?? [])
+          for (const parent of parents.get(occurrence.nodeId) ?? []) {
             dependents.add(graph.nodes.get(parent)?.name ?? parent);
+          }
         }
         return hits;
       });

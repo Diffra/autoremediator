@@ -280,12 +280,13 @@ function collect(program: AstNode, context: Context): Finding[] {
           callee.name === "RegExp"
         ) {
           const pattern = stringArgument(node, 0);
-          if (pattern !== undefined)
+          if (pattern !== undefined) {
             add(
               isRedosProne(pattern) ? "redos-regex-replaced" : "regex-changed",
               node,
               `regex /${pattern}/`,
             );
+          }
         }
         if (name !== undefined) {
           if (SANITIZER_NAME.test(name)) add("sanitizer-added", node, `call ${name}`);
@@ -296,8 +297,9 @@ function collect(program: AstNode, context: Context): Finding[] {
           }
           if (name === "create" && chain === "Object.create") {
             const first = (node.arguments as AstNode[] | undefined)?.[0];
-            if (first?.type === "Literal" && first.value === null)
+            if (first?.type === "Literal" && first.value === null) {
               add("null-prototype-object-added", node);
+            }
           }
           if (["includes", "indexOf", "startsWith", "endsWith"].includes(name)) {
             const needle = stringArgument(node, 0);
@@ -581,7 +583,8 @@ export function lineDiff(before: string, after: string): { added: string[]; remo
     else added.push(line);
   }
   const removed: string[] = [];
-  for (const [line, count] of counts)
+  for (const [line, count] of counts) {
     for (let index = 0; index < count; index++) removed.push(line);
+  }
   return { added, removed };
 }

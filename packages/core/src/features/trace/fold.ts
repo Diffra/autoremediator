@@ -94,8 +94,9 @@ export function foldTraceRecords(
       for (const entry of stringsOf(record.entries)) found.entries.add(entry);
       for (const dependent of stringsOf(record.dependents)) found.dependents.add(dependent);
       for (const format of stringsOf(record.formats)) {
-        if ((FORMATS as readonly string[]).includes(format))
+        if ((FORMATS as readonly string[]).includes(format)) {
           found.formats.add(format as ModuleFormat);
+        }
       }
     } else {
       const found = accumulator(record.name, record.version);
@@ -104,8 +105,9 @@ export function foldTraceRecords(
       }
       for (const name of stringsOf(record.wrapped)) found.wrapped.add(name);
       for (const [name, reason] of Object.entries(record.unwrapped ?? {})) {
-        if (typeof reason === "string" && !found.unwrapped.has(name))
+        if (typeof reason === "string" && !found.unwrapped.has(name)) {
           found.unwrapped.set(name, reason);
+        }
       }
     }
   }

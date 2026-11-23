@@ -154,8 +154,9 @@ export function nextVersionOf(
   const pending = usesChangesets ? pendingBump(cwd, packageName) : undefined;
   const bump: Bump = pending ?? "patch";
   const version = semver.inc(current, bump);
-  if (!version)
+  if (!version) {
     return { note: `Cannot compute the next version from ${current}; pass --next-version.` };
+  }
   const why = pending
     ? `a ${pending} bump is already pending in .changeset`
     : `a patch after ${current}`;

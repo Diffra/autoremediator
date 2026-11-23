@@ -39,8 +39,9 @@ export async function resolvePatchMode(
   packageManager: PackageManager,
   cwd: string,
 ): Promise<PatchMode> {
-  if (packageManager === "npm" || packageManager === "bun" || packageManager === "deno")
+  if (packageManager === "npm" || packageManager === "bun" || packageManager === "deno") {
     return "patch-package";
+  }
   if (packageManager === "pnpm") return "native-pnpm";
 
   const major = await getYarnMajorVersion(cwd);

@@ -29,10 +29,11 @@ export function summarizeScanReport(report: ScanReport, mode: "plan" | "fix"): s
   }
   const requests = report.changeRequests ?? [];
   for (const request of requests) {
-    if (request.url)
+    if (request.url) {
       lines.push("", `Pull request: ${request.url}${request.updated ? " (updated)" : ""}`);
-    else if (request.error)
+    } else if (request.error) {
       lines.push("", `Pull request not created: ${request.error.slice(0, 200)}`);
+    }
   }
   return lines.join("\n");
 }

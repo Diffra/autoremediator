@@ -84,8 +84,9 @@ export function isSubpathExported(manifest: Record<string, unknown>, subpath: st
           candidate.startsWith(before) &&
           candidate.endsWith(after) &&
           candidate.length > before.length + after.length
-        )
+        ) {
           return true;
+        }
       }
     }
   }

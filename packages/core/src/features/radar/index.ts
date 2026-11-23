@@ -311,10 +311,11 @@ async function analyse(run: Run, installed: InstalledPackage): Promise<Outcome> 
     const result = codeDiffFlags({ before: previous.files, after: current.files }, release);
     filesChanged += result.filesChanged;
     flags.push(...result.flags);
-    if (result.filesSkipped > 0)
+    if (result.filesSkipped > 0) {
       notes.push(
         `${result.filesSkipped} file(s) in ${release} were too large or unparseable and were not compared`,
       );
+    }
   }
   if (diffMode === "span") {
     notes.push(
@@ -381,12 +382,13 @@ async function analyse(run: Run, installed: InstalledPackage): Promise<Outcome> 
         semver.valid(advisory.fixedIn) !== null &&
         semver.gt(advisory.fixedIn, installed.version) &&
         semver.lte(advisory.fixedIn, target);
-      if (inRange)
+      if (inRange) {
         advisories.push({ id: sanitizeEvidence(advisory.id, 60), fixedIn: advisory.fixedIn });
-      else
+      } else {
         notes.push(
           `${sanitizeEvidence(advisory.id, 60)} also affects ${installed.version} but is not fixed by ${target}`,
         );
+      }
     }
     if (advisories.length > 0) status = "now-advisory";
   } catch {
@@ -415,12 +417,14 @@ async function analyse(run: Run, installed: InstalledPackage): Promise<Outcome> 
     flags: flags.toSorted((a, b) => b.points - a.points || a.release.localeCompare(b.release)),
     notes,
   };
-  if (range.length > MAX_LISTED_RELEASES)
+  if (range.length > MAX_LISTED_RELEASES) {
     entry.notes.push(
       `only the newest ${MAX_LISTED_RELEASES} of ${range.length} releases are listed`,
     );
-  if (filesChanged === 0 && diffMode === "per-release")
+  }
+  if (filesChanged === 0 && diffMode === "per-release") {
     entry.notes.push("no source file changed between these releases");
+  }
 
   // 6. Upgrade impact on this project, for the few best direct dependencies.
   if (
@@ -496,8 +500,9 @@ export async function radar(
     8 * 1024 * 1024 * 1024,
   );
   const target = options.target ?? "latest";
-  if (!["latest", "minor", "patch"].includes(target))
+  if (!["latest", "minor", "patch"].includes(target)) {
     throw new Error(`target must be latest, minor or patch (got "${target as string}")`);
+  }
 
   const deps: RadarDeps = { ...createDefaultRadarDeps(), ...overrides };
   if (options.model && !deps.model) {

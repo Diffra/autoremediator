@@ -112,8 +112,9 @@ export type RecipeBreaking = Recipe["breaking"][number];
 
 /** Parse and validate recipe JSON. Throws one error naming every problem. */
 export function parseRecipe(text: string): Recipe {
-  if (Buffer.byteLength(text) > MAX_RECIPE_BYTES)
+  if (Buffer.byteLength(text) > MAX_RECIPE_BYTES) {
     throw new Error(`the recipe is larger than ${MAX_RECIPE_BYTES} bytes`);
+  }
   let raw: unknown;
   try {
     raw = JSON.parse(text);

@@ -204,10 +204,11 @@ export async function generateProofOfFix(
 ): Promise<ProveResult> {
   const typedId = cveId.trim();
   const advisoryId = isAdvisoryId(typedId) ? normalizeAdvisoryId(typedId) : typedId;
-  if (advisoryId === "")
+  if (advisoryId === "") {
     throw new Error(
       "Name the advisory: a CVE or GHSA id, or any label together with advisoryText.",
     );
+  }
   if (!options.advisoryText && !isAdvisoryId(advisoryId)) {
     throw new Error(
       `"${advisoryId.slice(0, 80)}" is not an advisory id (CVE-, GHSA-, OSV-, MAL-). Give one, or pass advisoryText to describe the vulnerability yourself.`,

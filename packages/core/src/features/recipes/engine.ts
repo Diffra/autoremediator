@@ -101,9 +101,9 @@ function renderFileDiff(path: string, old: readonly string[], edits: readonly Ed
   for (const edit of edits) {
     const group = groups.at(-1);
     const previous = group?.at(-1);
-    if (group && previous && edit.start - (previous.start + previous.delLength) <= 2 * CONTEXT)
+    if (group && previous && edit.start - (previous.start + previous.delLength) <= 2 * CONTEXT) {
       group.push(edit);
-    else groups.push([edit]);
+    } else groups.push([edit]);
   }
 
   const out = [`diff --git a/${path} b/${path}`, `--- a/${path}`, `+++ b/${path}`];
@@ -160,8 +160,13 @@ export function planRecipe(recipe: Recipe, files: readonly SourceFile[]): Recipe
 
   for (const file of files) {
     if (!isSafeDiffPath(file.path)) continue;
-    if (file.text.length > MAX_FILE_BYTES || file.text.includes("\r") || !file.text.endsWith("\n"))
+    if (
+      file.text.length > MAX_FILE_BYTES ||
+      file.text.includes("\r") ||
+      !file.text.endsWith("\n")
+    ) {
       continue;
+    }
     if (!mentionsPackage(file.text, recipe.package)) continue;
     const lines = file.text.slice(0, -1).split("\n");
 
@@ -169,8 +174,9 @@ export function planRecipe(recipe: Recipe, files: readonly SourceFile[]): Recipe
       const pattern = [...hunk.before, ...hunk.remove, ...hunk.after];
       for (const found of findAll(lines, pattern)) {
         total += 1;
-        if (total > MAX_CHANGES)
+        if (total > MAX_CHANGES) {
           return { ok: false, reason: `the recipe would make more than ${MAX_CHANGES} changes` };
+        }
         matchedHunks.add(index);
         const entry = edits.get(file.path) ?? { lines, edits: [] };
         entry.edits.push({
@@ -194,8 +200,9 @@ export function planRecipe(recipe: Recipe, files: readonly SourceFile[]): Recipe
     };
   }
   if (edits.size === 0) return { ok: false, reason: "no source file matches the recipe" };
-  if (edits.size > MAX_FILES_CHANGED)
+  if (edits.size > MAX_FILES_CHANGED) {
     return { ok: false, reason: `the recipe would change more than ${MAX_FILES_CHANGED} files` };
+  }
 
   const matches: RecipeMatch[] = [];
   const diffs: string[] = [];

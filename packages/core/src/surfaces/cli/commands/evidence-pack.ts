@@ -65,8 +65,9 @@ function describePack(result: EvidencePackResult): string {
 }
 
 export async function runEvidencePack(opts: EvidencePackCliOptions): Promise<void> {
-  if (!opts.out)
+  if (!opts.out) {
     throw new Error("--out <dir> is required: the directory to write the evidence pack into.");
+  }
   const result = await buildEvidencePack({
     outDir: opts.out,
     cwd: opts.cwd,

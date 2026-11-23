@@ -242,8 +242,9 @@ describe("removeUnusedDependencies", () => {
             string,
             Record<string, string> | undefined
           >;
-          for (const section of ["dependencies", "devDependencies"])
+          for (const section of ["dependencies", "devDependencies"]) {
             for (const name of names) delete manifest[section]?.[name];
+          }
           writeFileSync(file, `${JSON.stringify(manifest, null, 2)}\n`);
         },
       }),

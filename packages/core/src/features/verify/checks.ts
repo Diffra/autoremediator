@@ -115,8 +115,9 @@ const constraintsOf = (context: CheckContext) => ({
 /** Only the files a dependency change may touch (plus the project's source, if allowed) changed. */
 const scope: CheckFn = async (context) => {
   const files = await context.changedFiles();
-  if (files === undefined)
+  if (files === undefined) {
     return skip("not a git repository, so the changed files cannot be listed");
+  }
 
   const violations: string[] = [];
   for (const file of files) {
@@ -223,8 +224,9 @@ const vulnGone: CheckFn = async (context) => {
   if (context.request.advisories.length === 0) return skip("no advisory to check against");
 
   const inventory = await context.inventory();
-  if ("error" in inventory)
+  if ("error" in inventory) {
     return fail("the installed packages could not be listed", [inventory.error]);
+  }
 
   const allowed = new Set(context.request.expectedRemaining ?? []);
   const remaining: string[] = [];
@@ -289,10 +291,11 @@ const proofOfFix: CheckFn = async (context) => {
     proofOfFix: proof,
     reproductionTest,
   });
-  if (!prepared.testFilePath)
+  if (!prepared.testFilePath) {
     return required
       ? fail("the reproduction test could not be found")
       : skip("no reproduction test found");
+  }
 
   const phase = await runProofOfFixPhase({
     stage: "positive",

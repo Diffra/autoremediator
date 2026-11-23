@@ -31,16 +31,18 @@ export interface AppliedPatch {
 /** Throws when a diff holds binary, mode, rename or symbolic link changes. */
 export function assertPlainTextPatch(diff: string): void {
   for (const [pattern, what] of FORBIDDEN_PATCH) {
-    if (pattern.test(diff))
+    if (pattern.test(diff)) {
       throw new Error(`The patch contains ${what}, which an attempt may not change.`);
+    }
   }
 }
 
 /** Check a diff against everything an attempt may change, then apply it to the checkout. */
 export async function validateAndApplyPatch(checkout: string, diff: string): Promise<AppliedPatch> {
   if (diff.trim().length === 0) throw new Error("The patch is empty.");
-  if (Buffer.byteLength(diff) > MAX_PATCH_BYTES)
+  if (Buffer.byteLength(diff) > MAX_PATCH_BYTES) {
     throw new Error(`The patch is larger than ${MAX_PATCH_BYTES} bytes.`);
+  }
   assertPlainTextPatch(diff);
   const text = diff.endsWith("\n") ? diff : `${diff}\n`;
 
@@ -69,8 +71,9 @@ export async function validateAndApplyPatch(checkout: string, diff: string): Pro
     try {
       guard.assertWritable(resolve(top, file));
     } catch (error) {
-      if (error instanceof ScopeViolation)
+      if (error instanceof ScopeViolation) {
         throw new Error(`Patch refused: ${error.message}`, { cause: error });
+      }
       throw error;
     }
   }

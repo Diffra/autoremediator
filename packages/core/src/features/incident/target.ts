@@ -45,10 +45,11 @@ export async function resolveTarget(
   deps: TargetDeps = defaultTargetDeps,
 ): Promise<IncidentTarget> {
   const typed = input.trim();
-  if (typed === "")
+  if (typed === "") {
     throw new Error(
       "Name what was compromised: an advisory id (MAL-…, GHSA-…, CVE-…) or package@range.",
     );
+  }
 
   if (!isAdvisoryId(typed)) {
     const parsed = parsePackageSpec(typed);
@@ -65,8 +66,9 @@ export async function resolveTarget(
       );
     }
     const range = normalizeRange(parsed.range);
-    if (!range)
+    if (!range) {
       throw new Error(`"${parsed.range}" is not a valid semver range for ${parsed.name}.`);
+    }
     return { input: typed, kind: "package-range", affected: [{ name: parsed.name, range }] };
   }
 
@@ -116,12 +118,13 @@ export async function resolveTarget(
     const existing = affected.find((candidate) => candidate.name === entry.name);
     // The same package listed twice (two ranges): either range being installed counts.
     if (existing) existing.range = `${existing.range} || ${range}`;
-    else
+    else {
       affected.push({
         name: entry.name,
         range,
         ...(entry.firstPatchedVersion ? { firstPatchedVersion: entry.firstPatchedVersion } : {}),
       });
+    }
   }
   if (affected.length === 0) {
     throw new Error(

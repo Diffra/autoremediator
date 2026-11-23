@@ -170,8 +170,9 @@ export class RunStore {
 
   /** Directory of one attempt; both ids are validated. */
   attemptDir(runId: string, attemptId: string): string {
-    if (!isAttemptId(attemptId))
+    if (!isAttemptId(attemptId)) {
       throw new Error(`Invalid attempt id: ${JSON.stringify(attemptId)}`);
+    }
     return join(this.runDir(runId), "attempts", attemptId);
   }
 
@@ -179,8 +180,9 @@ export class RunStore {
   writeAttempt(runId: string, record: AttemptRecord, files: Record<string, string> = {}): void {
     const dir = this.attemptDir(runId, record.attemptId);
     mkdirSync(dir, { recursive: true });
-    for (const [name, content] of Object.entries(files))
+    for (const [name, content] of Object.entries(files)) {
       writeFileSync(join(dir, name), content, "utf8");
+    }
     this.writeJson(runId, `attempts/${record.attemptId}/attempt.json`, record);
   }
 

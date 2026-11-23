@@ -10,8 +10,9 @@ function flagLines(entry: RadarEntry): string[] {
         flag.occurrences > 1 ? `, ${flag.occurrences} places` : ""
       })\n       ${flag.evidence}`,
   );
-  if (entry.flags.length > shown.length)
+  if (entry.flags.length > shown.length) {
     lines.push(`     ... and ${entry.flags.length - shown.length} more signal(s)`);
+  }
   return lines;
 }
 
@@ -39,8 +40,9 @@ export function renderRadar(report: RadarReport): string {
       `   ${entry.statement}`,
       ...flagLines(entry),
     );
-    if (entry.impact)
+    if (entry.impact) {
       lines.push(`   upgrade impact: ${entry.impact.rating} - ${entry.impact.summary}`);
+    }
     for (const note of entry.notes) lines.push(`   note: ${note}`);
     lines.push("");
   }

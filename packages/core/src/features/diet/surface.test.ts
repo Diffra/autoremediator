@@ -74,8 +74,9 @@ describe("the attack-surface formula", () => {
       Math.round(Object.values(points).reduce((sum, value) => sum + value, 0)),
     );
     // Every component carries its formula, so a reader can check the arithmetic.
-    for (const component of surface.components)
+    for (const component of surface.components) {
       expect(component.formula.length).toBeGreaterThan(10);
+    }
   });
 
   it("admits what it cannot see", () => {

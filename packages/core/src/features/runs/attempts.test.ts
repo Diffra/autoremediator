@@ -392,8 +392,9 @@ describe("host-driven attempts", { timeout: 60_000 }, () => {
     const { runId } = await plan("dep");
     const itemId = itemOf(runId, "dep");
     const opened = [] as string[];
-    for (let i = 0; i < 4; i++)
+    for (let i = 0; i < 4; i++) {
       opened.push((await startAttempt({ cwd: dir, runId, itemId }, deps())).attemptId);
+    }
     await expect(startAttempt({ cwd: dir, runId, itemId }, deps())).rejects.toThrow(
       /4 open attempts/,
     );

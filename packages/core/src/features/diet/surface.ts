@@ -131,11 +131,11 @@ export function attackSurface(input: SurfaceInputs): AttackSurface {
   ];
 
   const limits: string[] = [];
-  if (input.lockfileNote)
+  if (input.lockfileNote) {
     limits.push(
       `${input.lockfileNote}; package count, depth, install scripts, deprecations and copies are not counted, so the score is a lower bound`,
     );
-  else if (input.installedMissing) {
+  } else if (input.installedMissing) {
     limits.push(
       `only ${input.manifestsRead} of ${input.installedPackages} installed package.json files could be read (the rest are not installed here, such as optional packages for other platforms), so install scripts for those come only from lockfile flags and may be undercounted`,
     );

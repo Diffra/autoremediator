@@ -191,8 +191,9 @@ function keysIn(node: unknown, key: string, out: string[] = [], depth = 0): stri
     return out;
   }
   for (const [name, child] of Object.entries(node)) {
-    if (name === key && typeof child === "object" && child !== null && !Array.isArray(child))
+    if (name === key && typeof child === "object" && child !== null && !Array.isArray(child)) {
       out.push(...Object.keys(child));
+    }
     keysIn(child, key, out, depth + 1);
   }
   return out;
@@ -273,8 +274,9 @@ function scanGithubWorkflow(file: string, text: string): CiFile {
     ]) {
       secrets.add(name);
     }
-    for (const name of [...sensitiveEnvKeys({ env: job["env"] }), ...sensitiveEnvKeys(steps)])
+    for (const name of [...sensitiveEnvKeys({ env: job["env"] }), ...sensitiveEnvKeys(steps)]) {
       envNames.add(name);
+    }
 
     if (job["secrets"] === "inherit") {
       result.notes.push(
@@ -515,17 +517,20 @@ export function scanSecrets(cwd: string): SecretsChecklist {
     byName.set(name, entry);
   };
   for (const entry of ci) {
-    for (const name of [...entry.secretNames, ...entry.envNames])
+    for (const name of [...entry.secretNames, ...entry.envNames]) {
       note(name, entry.file, entry.installs || entry.installJobs.length > 0);
+    }
   }
   for (const entry of containers) {
-    for (const name of [...entry.names, ...entry.secretMounts])
+    for (const name of [...entry.names, ...entry.secretMounts]) {
       note(name, entry.file, entry.installs);
+    }
   }
   for (const entry of npmrc) for (const name of entry.envNames) note(name, entry.file, true);
   // Templates describe what a developer's environment holds, which a local install can reach.
-  for (const entry of envTemplates)
+  for (const entry of envTemplates) {
     for (const name of entry.sensitiveNames) note(name, entry.file, true);
+  }
 
   return {
     disclaimer: CHECKLIST_DISCLAIMER,

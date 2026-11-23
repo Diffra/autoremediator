@@ -38,8 +38,9 @@ function declaredNames(manifest: Manifest): string[] {
 /** Add the manifest's own scripts and tool sections to a package's tokens. */
 function addManifestTokens(usage: PackageUsage, manifest: Manifest): void {
   for (const [label, text] of scriptTexts(manifest)) {
-    for (const token of tokensOf(text))
+    for (const token of tokensOf(text)) {
       if (!usage.tokens.has(token)) usage.tokens.set(token, label);
+    }
   }
   for (const token of tokensOf(manifestConfigText(manifest))) {
     if (!usage.tokens.has(token)) usage.tokens.set(token, "package.json");
@@ -56,8 +57,9 @@ export async function analyzeDependencies(
 ): Promise<DependencyDietReport> {
   const cwd = resolve(options.cwd ?? process.cwd());
   const rootManifest = readManifest(join(cwd, "package.json"));
-  if (!rootManifest)
+  if (!rootManifest) {
     throw new Error(`No readable package.json in ${cwd}. Run this in a Node.js project.`);
+  }
 
   const workspaceRoot = findWorkspaceRoot(cwd);
   const root = workspaceRoot ?? cwd;

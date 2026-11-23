@@ -101,13 +101,15 @@ export function addRecipesCommand(program: Command): void {
       );
       if (!entry?.recipe) throw new Error(`Recipe not found: ${id}`);
       const { recipe } = entry;
-      if (opts.outputFormat === "json")
+      if (opts.outputFormat === "json") {
         return logJson({ id: entry.id, source: entry.source, file: entry.file, recipe });
+      }
       out(`${entry.id}  ${sourceLabel(entry.source)}  (${entry.file})`);
       out(`${recipe.package}: from ${recipe.fromRange} to ${recipe.toRange}`);
       if (recipe.summary) out(recipe.summary);
-      for (const broke of recipe.breaking)
+      for (const broke of recipe.breaking) {
         out(`  broke: ${broke.kind}${broke.symbol ? ` ${broke.symbol}` : ""}: ${broke.message}`);
+      }
       for (const [index, hunk] of recipe.hunks.entries()) {
         out(
           `\nhunk ${index + 1}${hunk.optional ? " (optional)" : ""}${hunk.note ? `: ${hunk.note}` : ""}`,
@@ -185,12 +187,13 @@ export function addRecipesCommand(program: Command): void {
         ...(opts.packageVersion ? { version: opts.packageVersion } : {}),
         ...(Array.isArray(opts.package) ? { packages: opts.package } : {}),
       });
-      if (opts.outputFormat === "json")
+      if (opts.outputFormat === "json") {
         return logJson({
           outDir: result.outDir,
           files: result.files,
           recipes: result.recipes.map((entry) => entry.id),
         });
+      }
       out(`Wrote ${result.recipes.length} recipe(s) to ${result.outDir}:`);
       for (const file of result.files) out(`  ${file}`);
       out("Review them, then publish with `npm publish` from that directory.");

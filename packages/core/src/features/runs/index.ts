@@ -299,13 +299,15 @@ export function listRuns(options: ListRunsOptions = {}): RunRecord[] {
 
 function resolveRun(store: RunStore, options: ApplyPlanOptions): RunRecord {
   if (options.runId) {
-    if (!isRunId(options.runId))
+    if (!isRunId(options.runId)) {
       throw new Error(`Invalid run id: ${JSON.stringify(options.runId)}`);
+    }
     return store.load(options.runId);
   }
   if (options.planId) {
-    if (!isPlanId(options.planId))
+    if (!isPlanId(options.planId)) {
       throw new Error(`Invalid plan id: ${JSON.stringify(options.planId)}`);
+    }
     const match = store
       .list()
       .find((run) => run.planId === options.planId && run.status !== "rolled-back");
@@ -681,8 +683,9 @@ export async function rollbackRun(
   const run = store.load(options.runId);
   const runId = run.runId;
 
-  if (run.status === "planned")
+  if (run.status === "planned") {
     throw new Error(`Run ${runId} made no changes; there is nothing to roll back.`);
+  }
   if (run.status === "rolled-back") throw new Error(`Run ${runId} is already rolled back.`);
   if (!store.hasFile(runId, SNAPSHOT_MANIFEST)) {
     throw new Error(`Run ${runId} has no snapshot to restore.`);
