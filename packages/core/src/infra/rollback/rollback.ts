@@ -10,6 +10,7 @@ import {
 } from "node:fs";
 import { isAbsolute, join, relative, resolve } from "node:path";
 
+import { RollbackError, errorMessage } from "../../shared/errors.js";
 import { safeExeca } from "../../shared/exec/safe-exec.js";
 import { MEMORY_PATH, TRACK_RECORD_PATH } from "../../shared/state-paths.js";
 
@@ -51,9 +52,9 @@ export function unregisterActiveSnapshot(snapshot: ProjectSnapshot): void {
 export function recordFileTouch(filePath: string): void {
   for (const snapshot of activeSnapshots) {
     const absPath = isAbsolute(filePath) ? filePath : join(snapshot.cwd, filePath);
-    if (!absPath.startsWith(snapshot.cwd)) continue;
-
     const relPath = relative(snapshot.cwd, absPath);
+    if (relPath.startsWith("..") || isAbsolute(relPath)) continue;
+
     if (!snapshot.fileSnapshots.has(relPath)) {
       if (existsSync(absPath)) {
         try {
@@ -203,7 +204,7 @@ export async function createProjectSnapshot(
   const fileSnapshots = new Map<string, string | null>();
 
   const targetFiles = explicitFiles
-    ? explicitFiles.map((f) => (f.startsWith(cwd) ? f : join(cwd, f)))
+    ? explicitFiles.map((f) => (isAbsolute(f) ? f : join(cwd, f)))
     : discoverProjectFiles(cwd);
 
   for (const fullPath of targetFiles) {
@@ -236,9 +237,72 @@ export async function createProjectSnapshot(
 
 /**
  * Restores project state from snapshot using Git transaction restore or in-memory fallback.
+ * Every step is attempted; a file that could not be put back is reported by a `RollbackError`
+ * rather than a rollback that looks clean.
  */
 export async function restoreProjectSnapshot(snapshot: ProjectSnapshot): Promise<void> {
-  // 1. In-memory exact file restoration for all tracked and dynamically touched files
+  const failures = restoreTrackedFiles(snapshot);
+
+  if (snapshot.isGit) {
+    // Git state that cannot be read leaves only the tracked files above to restore.
+    const currentStatus = await getGitStatusPorcelain(snapshot.cwd);
+    for (const action of gitCleanupActions(snapshot, currentStatus)) {
+      if (action.kind === "remove") {
+        removeQuietly(action.path, failures, snapshot.cwd);
+        continue;
+      }
+      try {
+        await safeExeca("git", ["checkout", "--", action.path], {
+          cwd: snapshot.cwd,
+          stdio: "pipe",
+        });
+      } catch {
+        failures.push(relative(snapshot.cwd, action.path));
+      }
+    }
+  }
+  assertRestored(failures);
+}
+
+/**
+ * Synchronously restores project state from snapshot.
+ */
+export function restoreProjectSnapshotSync(snapshot: ProjectSnapshot): void {
+  const failures = restoreTrackedFiles(snapshot);
+
+  if (snapshot.isGit) {
+    let currentStatus: string[] = [];
+    try {
+      const stdout = execSync("git status --porcelain=v1 -uall", {
+        cwd: snapshot.cwd,
+        stdio: ["pipe", "pipe", "ignore"],
+        encoding: "utf8",
+      });
+      currentStatus = parsePorcelainLines(stdout);
+    } catch {
+      // Git state that cannot be read leaves only the tracked files above to restore.
+    }
+    for (const action of gitCleanupActions(snapshot, currentStatus)) {
+      if (action.kind === "remove") {
+        removeQuietly(action.path, failures, snapshot.cwd);
+        continue;
+      }
+      try {
+        execFileSync("git", ["checkout", "--", action.path], {
+          cwd: snapshot.cwd,
+          stdio: "ignore",
+        });
+      } catch {
+        failures.push(relative(snapshot.cwd, action.path));
+      }
+    }
+  }
+  assertRestored(failures);
+}
+
+/** Puts back every snapshotted file and removes manifest files created since. Returns what failed. */
+function restoreTrackedFiles(snapshot: ProjectSnapshot): string[] {
+  const failures: string[] = [];
   for (const [relPath, previousContent] of snapshot.fileSnapshots.entries()) {
     const fullPath = join(snapshot.cwd, relPath);
     // A snapshot can come from a file the project carries; never write or delete outside it.
@@ -246,165 +310,66 @@ export async function restoreProjectSnapshot(snapshot: ProjectSnapshot): Promise
     if (escape.startsWith("..") || isAbsolute(escape)) {
       throw new Error(`Refusing to restore "${relPath}": it is outside the project.`);
     }
-    if (previousContent === null) {
-      if (existsSync(fullPath)) {
-        try {
-          rmSync(fullPath, { force: true, recursive: true });
-        } catch {
-          // Ignore removal error
-        }
-      }
-    } else {
-      try {
-        writeFileSync(fullPath, previousContent, "latin1");
-      } catch {
-        // Ignore write error
-      }
-    }
-  }
-
-  // 2. Discover any newly created files matching manifest/patch patterns that were not in snapshot
-  const currentFiles = discoverProjectFiles(snapshot.cwd);
-  for (const fullPath of currentFiles) {
-    const relPath = relative(snapshot.cwd, fullPath);
-    if (!snapshot.fileSnapshots.has(relPath)) {
-      try {
-        rmSync(fullPath, { force: true, recursive: true });
-      } catch {
-        // Ignore removal error
-      }
-    }
-  }
-
-  // 3. If inside Git repo, clean any newly introduced untracked artifacts not in before-status
-  if (snapshot.isGit) {
     try {
-      const currentStatus = await getGitStatusPorcelain(snapshot.cwd);
-      const beforeSet = new Set(snapshot.gitStatusBefore ?? []);
-
-      for (const line of currentStatus) {
-        if (beforeSet.has(line)) continue;
-        const parsed = parseGitPorcelainLine(line);
-        if (!parsed) continue;
-        const { statusCode, filePath } = parsed;
-        const fullPath = resolveGitStatusPath(snapshot, filePath);
-        if (!fullPath) continue;
-
-        if (statusCode === "??" && existsSync(fullPath)) {
-          // Untracked newly generated file
-          try {
-            rmSync(fullPath, { force: true, recursive: true });
-          } catch {
-            // Ignore
-          }
-        } else if (
-          statusCode === "M" ||
-          statusCode === "MM" ||
-          statusCode === "D" ||
-          statusCode.includes("M") ||
-          statusCode.includes("D") ||
-          statusCode.includes("T")
-        ) {
-          // Revert tracked modified or deleted file
-          try {
-            await safeExeca("git", ["checkout", "--", fullPath], {
-              cwd: snapshot.cwd,
-              stdio: "pipe",
-            });
-          } catch {
-            // Ignore
-          }
-        }
+      if (previousContent === null) {
+        rmSync(fullPath, { force: true, recursive: true });
+      } else {
+        writeFileSync(fullPath, previousContent, "latin1");
       }
     } catch {
-      // Non-fatal Git clean error
+      failures.push(relPath);
     }
+  }
+
+  // Manifest and patch files that appeared since the snapshot were not in it.
+  for (const fullPath of discoverProjectFiles(snapshot.cwd)) {
+    const relPath = relative(snapshot.cwd, fullPath);
+    if (!snapshot.fileSnapshots.has(relPath)) {
+      removeQuietly(fullPath, failures, snapshot.cwd);
+    }
+  }
+  return failures;
+}
+
+function removeQuietly(path: string, failures: string[], cwd: string): void {
+  try {
+    rmSync(path, { force: true, recursive: true });
+  } catch {
+    failures.push(relative(cwd, path));
   }
 }
 
-/**
- * Synchronously restores project state from snapshot.
- */
-export function restoreProjectSnapshotSync(snapshot: ProjectSnapshot): void {
-  // 1. In-memory exact file restoration for all tracked and dynamically touched files
-  for (const [relPath, previousContent] of snapshot.fileSnapshots.entries()) {
-    const fullPath = join(snapshot.cwd, relPath);
-    if (previousContent === null) {
-      if (existsSync(fullPath)) {
-        try {
-          rmSync(fullPath, { force: true, recursive: true });
-        } catch {
-          // Ignore removal error
-        }
-      }
-    } else {
-      try {
-        writeFileSync(fullPath, previousContent, "latin1");
-      } catch {
-        // Ignore write error
-      }
+interface GitCleanupAction {
+  kind: "remove" | "checkout";
+  path: string;
+}
+
+/** What to undo for files git reports changed since the snapshot: delete new ones, revert tracked ones. */
+function gitCleanupActions(snapshot: ProjectSnapshot, currentStatus: string[]): GitCleanupAction[] {
+  const beforeSet = new Set(snapshot.gitStatusBefore ?? []);
+  const actions: GitCleanupAction[] = [];
+  for (const line of currentStatus) {
+    if (beforeSet.has(line)) continue;
+    const parsed = parseGitPorcelainLine(line);
+    if (!parsed) continue;
+    const { statusCode, filePath } = parsed;
+    const fullPath = resolveGitStatusPath(snapshot, filePath);
+    if (!fullPath) continue;
+
+    if (statusCode === "??") {
+      if (existsSync(fullPath)) actions.push({ kind: "remove", path: fullPath });
+    } else if (statusCode.includes("M") || statusCode.includes("D") || statusCode.includes("T")) {
+      actions.push({ kind: "checkout", path: fullPath });
     }
   }
+  return actions;
+}
 
-  // 2. Discover any newly created files matching manifest/patch patterns that were not in snapshot
-  const currentFiles = discoverProjectFiles(snapshot.cwd);
-  for (const fullPath of currentFiles) {
-    const relPath = relative(snapshot.cwd, fullPath);
-    if (!snapshot.fileSnapshots.has(relPath)) {
-      try {
-        rmSync(fullPath, { force: true, recursive: true });
-      } catch {
-        // Ignore removal error
-      }
-    }
-  }
-
-  // 3. If inside a Git repository, clean untracked artifacts and revert tracked modified files
-  if (snapshot.isGit) {
-    try {
-      const stdout = execSync("git status --porcelain=v1 -uall", {
-        cwd: snapshot.cwd,
-        stdio: ["pipe", "pipe", "ignore"],
-        encoding: "utf8",
-      });
-      const currentStatus = parsePorcelainLines(stdout);
-      const beforeSet = new Set(snapshot.gitStatusBefore ?? []);
-
-      for (const line of currentStatus) {
-        if (beforeSet.has(line)) continue;
-        const parsed = parseGitPorcelainLine(line);
-        if (!parsed) continue;
-        const { statusCode, filePath } = parsed;
-        const fullPath = resolveGitStatusPath(snapshot, filePath);
-        if (!fullPath) continue;
-
-        if (statusCode === "??" && existsSync(fullPath)) {
-          try {
-            rmSync(fullPath, { force: true, recursive: true });
-          } catch {
-            // Ignore
-          }
-        } else if (
-          statusCode === "M" ||
-          statusCode === "MM" ||
-          statusCode === "D" ||
-          statusCode.includes("M") ||
-          statusCode.includes("D") ||
-          statusCode.includes("T")
-        ) {
-          try {
-            execFileSync("git", ["checkout", "--", fullPath], {
-              cwd: snapshot.cwd,
-              stdio: "ignore",
-            });
-          } catch {
-            // Ignore
-          }
-        }
-      }
-    } catch {
-      // Non-fatal Git error
-    }
+function assertRestored(failures: string[]): void {
+  if (failures.length > 0) {
+    throw new RollbackError(
+      `${failures.length} file(s) could not be restored: ${[...new Set(failures)].join(", ")}`,
+    );
   }
 }
 
@@ -429,7 +394,14 @@ export async function withAtomicRollback<T>(
     }
     return result;
   } catch (error) {
-    await restoreProjectSnapshot(snapshot);
+    try {
+      await restoreProjectSnapshot(snapshot);
+    } catch (restoreError) {
+      throw new RollbackError(
+        `${errorMessage(error)} (and the rollback failed: ${errorMessage(restoreError)})`,
+        { cause: error },
+      );
+    }
     throw error;
   } finally {
     activeSnapshots.delete(snapshot);

@@ -57,3 +57,10 @@ export class UpstreamError extends AutoremediatorError {
     super("upstream-unavailable", message, options);
   }
 }
+
+/** A rollback left the project different from how it started; the message lists what was not restored. */
+export class RollbackError extends AutoremediatorError {
+  constructor(message: string, options: AutoremediatorErrorOptions = {}) {
+    super("rollback-failed", message, options);
+  }
+}

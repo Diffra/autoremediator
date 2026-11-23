@@ -151,6 +151,10 @@ dependencies from the restored lockfile (a frozen install), so `node_modules` ma
 `reinstall: false` to skip that. If the reinstall fails, the files are still restored and the report
 says so.
 
+A file the rollback cannot put back (a read-only file, a failed write) makes it fail with a
+`rollback-failed` error that lists the files, instead of reporting a clean rollback. Every other file
+is still restored first.
+
 A rollback is refused when the project changed since the run's last step, because restoring would
 discard that work; `--force` overrides it. The report says whether the project matches the state the
 plan was made against again (`matchesBase`).

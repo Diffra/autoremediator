@@ -1,4 +1,12 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -7,7 +15,11 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   createProjectSnapshot,
   discoverProjectFiles,
+  recordFileTouch,
+  registerActiveSnapshot,
   restoreProjectSnapshot,
+  restoreProjectSnapshotSync,
+  unregisterActiveSnapshot,
   withAtomicRollback,
 } from "./rollback.js";
 
@@ -111,5 +123,61 @@ describe("rollback", () => {
     ).rejects.toThrow("Patch compile failure");
 
     expect(readFileSync(customSourcePath, "utf8")).toBe("export const a = 1;");
+  });
+
+  it("fails loudly when a file cannot be put back instead of reporting a clean rollback", async () => {
+    const file = join(dir, "package.json");
+    writeFileSync(file, '{"name":"before"}');
+    const snapshot = await createProjectSnapshot(dir);
+
+    writeFileSync(file, '{"name":"after"}');
+    chmodSync(file, 0o444);
+    try {
+      await expect(restoreProjectSnapshot(snapshot)).rejects.toThrow(
+        /could not be restored.*package\.json/s,
+      );
+      expect(() => restoreProjectSnapshotSync(snapshot)).toThrow(/package\.json/);
+    } finally {
+      chmodSync(file, 0o644);
+    }
+  });
+
+  it("keeps the original error when the rollback itself fails", async () => {
+    const file = join(dir, "package.json");
+    writeFileSync(file, '{"name":"before"}');
+
+    await expect(
+      withAtomicRollback(dir, async () => {
+        writeFileSync(file, '{"name":"after"}');
+        chmodSync(file, 0o444);
+        throw new Error("the action failed");
+      }),
+    ).rejects.toThrow(/the action failed/);
+    chmodSync(file, 0o644);
+  });
+
+  it("refuses to restore a path outside the project in the synchronous restore too", async () => {
+    const snapshot = await createProjectSnapshot(dir);
+    const outside = `${dir}-outside.txt`;
+    snapshot.fileSnapshots.set(`../${outside.split("/").at(-1)}`, "planted");
+
+    expect(() => restoreProjectSnapshotSync(snapshot)).toThrow(/outside the project/);
+    expect(existsSync(outside)).toBe(false);
+  });
+
+  it("does not track files in a sibling directory that shares the project's path prefix", async () => {
+    const sibling = `${dir}-evil`;
+    mkdirSync(sibling, { recursive: true });
+    writeFileSync(join(sibling, "x.txt"), "content");
+    const snapshot = await createProjectSnapshot(dir);
+    registerActiveSnapshot(snapshot);
+    try {
+      recordFileTouch(join(sibling, "x.txt"));
+    } finally {
+      unregisterActiveSnapshot(snapshot);
+      rmSync(sibling, { recursive: true, force: true });
+    }
+
+    expect([...snapshot.fileSnapshots.keys()].some((key) => key.startsWith(".."))).toBe(false);
   });
 });
