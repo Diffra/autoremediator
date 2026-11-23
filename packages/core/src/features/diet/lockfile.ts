@@ -4,7 +4,7 @@ import { join } from "node:path";
 import YAML from "yaml";
 
 import { errorMessage } from "../../shared/errors.js";
-import { readManifest } from "./unused.js";
+import { readManifest } from "./manifest.js";
 
 /** One installed package version. */
 export interface LockNode {

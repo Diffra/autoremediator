@@ -205,148 +205,10 @@ export function scanSource(
     textMentions(usage, path, content, interesting);
   }
 
-  /** Call nodes whose symbols were read from their parent, so the generic visit skips them. */
-  const handled = new WeakSet<object>();
-  let dynamic = false;
+  const scan: SourceScan = { usage, path, interesting, handled: new WeakSet(), dynamic: false };
+  visitSource(program, scan);
 
-  const loadSymbols = (call: AstNode, kind: ReferenceKind, symbols: string[]): void => {
-    handled.add(call);
-    const specifier = staticSpecifier(
-      (call.arguments as unknown[] | undefined)?.[0] ?? call.source,
-    );
-    if (specifier === undefined) return;
-    addReference(usage, specifier, kind, symbols, path);
-  };
-
-  const visit = (node: unknown): void => {
-    if (Array.isArray(node)) {
-      for (const child of node) visit(child);
-      return;
-    }
-    if (!isNode(node)) return;
-
-    switch (node.type) {
-      case "ImportDeclaration": {
-        const specifier = staticSpecifier(node.source);
-        if (specifier !== undefined) {
-          const typeOnly = node.importKind === "type";
-          addReference(
-            usage,
-            specifier,
-            typeOnly ? "type-import" : "import",
-            importedSymbols(node.specifiers),
-            path,
-          );
-        }
-        break;
-      }
-      case "ExportAllDeclaration":
-      case "ExportNamedDeclaration": {
-        const specifier = staticSpecifier(node.source);
-        if (specifier !== undefined) {
-          const names =
-            node.type === "ExportAllDeclaration"
-              ? ["*"]
-              : (
-                  (node.specifiers as
-                    | { local?: { name?: string; value?: string } }[]
-                    | undefined) ?? []
-                ).map((entry) => entry.local?.name ?? entry.local?.value ?? "*");
-          addReference(
-            usage,
-            specifier,
-            node.exportKind === "type" ? "type-import" : "import",
-            names,
-            path,
-          );
-        }
-        break;
-      }
-      case "TSImportEqualsDeclaration": {
-        const reference = node.moduleReference as AstNode | undefined;
-        const specifier = staticSpecifier(reference?.expression);
-        if (specifier !== undefined) addReference(usage, specifier, "require", ["*"], path);
-        break;
-      }
-      case "TSImportType": {
-        const specifier = staticSpecifier(node.source ?? node.argument);
-        if (specifier !== undefined) addReference(usage, specifier, "type-import", ["*"], path);
-        break;
-      }
-      case "ImportExpression": {
-        if (!handled.has(node)) {
-          const specifier = staticSpecifier(node.source);
-          if (specifier === undefined) {
-            if (!looksRelative(node.source)) dynamic = true;
-          } else addReference(usage, specifier, "dynamic-import", ["*"], path);
-        }
-        break;
-      }
-      case "VariableDeclarator": {
-        // const { a } = require("x"), const x = require("x"), const { a } = await import("x")
-        const init =
-          isNode(node.init) && node.init.type === "AwaitExpression"
-            ? node.init.argument
-            : node.init;
-        if (isRequireCall(init)) loadSymbols(init, "require", patternSymbols(node.id));
-        else if (isNode(init) && init.type === "ImportExpression") {
-          handled.add(init);
-          const specifier = staticSpecifier(init.source);
-          if (specifier !== undefined) {
-            addReference(usage, specifier, "dynamic-import", patternSymbols(node.id), path);
-          } else if (!looksRelative(init.source)) dynamic = true;
-        }
-        break;
-      }
-      case "MemberExpression": {
-        // require("x").thing
-        if (isRequireCall(node.object)) {
-          const name = propertyName(node);
-          loadSymbols(node.object, "require", [name ?? "*"]);
-        }
-        break;
-      }
-      case "CallExpression": {
-        if (isRequireCall(node) && !handled.has(node)) {
-          const argument = (node.arguments as unknown[] | undefined)?.[0];
-          const specifier = staticSpecifier(argument);
-          if (specifier === undefined) {
-            if (!looksRelative(argument)) dynamic = true;
-          } else addReference(usage, specifier, "require", ["*"], path);
-        } else if (isRequireResolve(node.callee) || isImportMetaResolve(node.callee)) {
-          const argument = (node.arguments as unknown[] | undefined)?.[0];
-          const specifier = staticSpecifier(argument);
-          if (specifier === undefined) {
-            if (!looksRelative(argument)) dynamic = true;
-          } else addReference(usage, specifier, "resolve", ["*"], path);
-        }
-        break;
-      }
-      case "Literal": {
-        if (
-          typeof node.value === "string" &&
-          node.value.length < 214 &&
-          isDependencySpecifier(node.value)
-        ) {
-          const name = toRootPackageName(node.value);
-          if (interesting.has(name)) addMention(usage, name, path);
-        }
-        break;
-      }
-      default: {
-        break;
-      }
-    }
-
-    for (const key of Object.keys(node)) {
-      if (key === "parent" || key === "start" || key === "end") continue;
-      const value = node[key];
-      if (value && typeof value === "object") visit(value);
-    }
-  };
-  visit(program);
-
-  if (dynamic) usage.dynamicLoadFiles.push(path);
+  if (scan.dynamic) usage.dynamicLoadFiles.push(path);
 
   // `/// <reference types="x" />` and the JSX pragma live in comments, which the tree does not hold.
   for (const match of content.matchAll(/\/\/\/\s*<reference\s+types\s*=\s*["']([^"']+)["']/g)) {
@@ -354,6 +216,178 @@ export function scanSource(
   }
   for (const match of content.matchAll(/@jsxImportSource\s+(\S+)/g)) {
     if (match[1]) addReference(usage, match[1], "import", ["*"], path);
+  }
+}
+
+interface SourceScan {
+  usage: PackageUsage;
+  path: string;
+  interesting: ReadonlySet<string>;
+  /** Call nodes whose symbols were read from their parent, so the generic visit skips them. */
+  handled: WeakSet<object>;
+  /** The file loads a module by a name only known at run time. */
+  dynamic: boolean;
+}
+
+function visitSource(node: unknown, scan: SourceScan): void {
+  if (Array.isArray(node)) {
+    for (const child of node) visitSource(child, scan);
+    return;
+  }
+  if (!isNode(node)) return;
+
+  recordNode(node, scan);
+
+  for (const key of Object.keys(node)) {
+    if (key === "parent" || key === "start" || key === "end") continue;
+    const value = node[key];
+    if (value && typeof value === "object") visitSource(value, scan);
+  }
+}
+
+function recordNode(node: AstNode, scan: SourceScan): void {
+  switch (node.type) {
+    case "ImportDeclaration": {
+      recordImport(node, scan);
+      break;
+    }
+    case "ExportAllDeclaration":
+    case "ExportNamedDeclaration": {
+      recordReExport(node, scan);
+      break;
+    }
+    case "TSImportEqualsDeclaration": {
+      const reference = node.moduleReference as AstNode | undefined;
+      const specifier = staticSpecifier(reference?.expression);
+      if (specifier !== undefined) addReference(scan.usage, specifier, "require", ["*"], scan.path);
+      break;
+    }
+    case "TSImportType": {
+      const specifier = staticSpecifier(node.source ?? node.argument);
+      if (specifier !== undefined) {
+        addReference(scan.usage, specifier, "type-import", ["*"], scan.path);
+      }
+      break;
+    }
+    case "ImportExpression": {
+      if (!scan.handled.has(node)) recordDynamicImport(node, scan);
+      break;
+    }
+    case "VariableDeclarator": {
+      recordDeclaratorLoad(node, scan);
+      break;
+    }
+    case "MemberExpression": {
+      // require("x").thing
+      if (isRequireCall(node.object)) {
+        loadSymbols(scan, node.object, "require", [propertyName(node) ?? "*"]);
+      }
+      break;
+    }
+    case "CallExpression": {
+      recordCall(node, scan);
+      break;
+    }
+    case "Literal": {
+      recordMention(node, scan);
+      break;
+    }
+    default: {
+      break;
+    }
+  }
+}
+
+function loadSymbols(
+  scan: SourceScan,
+  call: AstNode,
+  kind: ReferenceKind,
+  symbols: string[],
+): void {
+  scan.handled.add(call);
+  const specifier = staticSpecifier((call.arguments as unknown[] | undefined)?.[0] ?? call.source);
+  if (specifier === undefined) return;
+  addReference(scan.usage, specifier, kind, symbols, scan.path);
+}
+
+function recordImport(node: AstNode, scan: SourceScan): void {
+  const specifier = staticSpecifier(node.source);
+  if (specifier === undefined) return;
+  const typeOnly = node.importKind === "type";
+  addReference(
+    scan.usage,
+    specifier,
+    typeOnly ? "type-import" : "import",
+    importedSymbols(node.specifiers),
+    scan.path,
+  );
+}
+
+function recordReExport(node: AstNode, scan: SourceScan): void {
+  const specifier = staticSpecifier(node.source);
+  if (specifier === undefined) return;
+  const names =
+    node.type === "ExportAllDeclaration"
+      ? ["*"]
+      : (
+          (node.specifiers as { local?: { name?: string; value?: string } }[] | undefined) ?? []
+        ).map((entry) => entry.local?.name ?? entry.local?.value ?? "*");
+  addReference(
+    scan.usage,
+    specifier,
+    node.exportKind === "type" ? "type-import" : "import",
+    names,
+    scan.path,
+  );
+}
+
+function recordDynamicImport(node: AstNode, scan: SourceScan): void {
+  const specifier = staticSpecifier(node.source);
+  if (specifier === undefined) {
+    if (!looksRelative(node.source)) scan.dynamic = true;
+  } else {
+    addReference(scan.usage, specifier, "dynamic-import", ["*"], scan.path);
+  }
+}
+
+/** const { a } = require("x"), const x = require("x"), const { a } = await import("x") */
+function recordDeclaratorLoad(node: AstNode, scan: SourceScan): void {
+  const init =
+    isNode(node.init) && node.init.type === "AwaitExpression" ? node.init.argument : node.init;
+  if (isRequireCall(init)) {
+    loadSymbols(scan, init, "require", patternSymbols(node.id));
+  } else if (isNode(init) && init.type === "ImportExpression") {
+    scan.handled.add(init);
+    const specifier = staticSpecifier(init.source);
+    if (specifier !== undefined) {
+      addReference(scan.usage, specifier, "dynamic-import", patternSymbols(node.id), scan.path);
+    } else if (!looksRelative(init.source)) {
+      scan.dynamic = true;
+    }
+  }
+}
+
+function recordCall(node: AstNode, scan: SourceScan): void {
+  const kind = isRequireCall(node) && !scan.handled.has(node) ? "require" : undefined;
+  const resolves = isRequireResolve(node.callee) || isImportMetaResolve(node.callee);
+  if (kind === undefined && !resolves) return;
+  const argument = (node.arguments as unknown[] | undefined)?.[0];
+  const specifier = staticSpecifier(argument);
+  if (specifier === undefined) {
+    if (!looksRelative(argument)) scan.dynamic = true;
+  } else {
+    addReference(scan.usage, specifier, kind ?? "resolve", ["*"], scan.path);
+  }
+}
+
+function recordMention(node: AstNode, scan: SourceScan): void {
+  if (
+    typeof node.value === "string" &&
+    node.value.length < 214 &&
+    isDependencySpecifier(node.value)
+  ) {
+    const name = toRootPackageName(node.value);
+    if (scan.interesting.has(name)) addMention(scan.usage, name, scan.path);
   }
 }
 

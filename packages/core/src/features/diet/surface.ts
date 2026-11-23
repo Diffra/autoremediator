@@ -2,8 +2,8 @@ import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 
 import type { LockGraph } from "./lockfile.js";
+import { readManifest } from "./manifest.js";
 import type { AttackSurface, SurfaceComponent } from "./types.js";
-import { readManifest } from "./unused.js";
 
 const INSTALL_SCRIPTS = ["preinstall", "install", "postinstall"] as const;
 
