@@ -12,8 +12,8 @@ import { describe, expect, it } from "vitest";
 const root = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "..", "..");
 
 const CAPS: Record<string, number> = {
-  "eslint/max-lines": 18,
-  "eslint/max-lines-per-function": 25,
+  "eslint/max-lines": 17,
+  "eslint/max-lines-per-function": 24,
 };
 
 interface Override {

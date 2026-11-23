@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { findVulnerableSymbols, parseCweIds } from "./fix-diff.js";
+import { findVulnerableSymbols } from "./fix-diff.js";
+import { parseCweIds } from "./fix-score.js";
 import { pkg } from "./testing/fixtures.js";
 
 const symbols = (diff: ReturnType<typeof findVulnerableSymbols>): string[] =>
