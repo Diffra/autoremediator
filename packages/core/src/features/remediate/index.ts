@@ -21,7 +21,7 @@ import {
   writeRemediateEvidence,
 } from "./evidence.js";
 import { runLocalRemediationPipeline } from "./local/index.js";
-import { applySimulationMetadata, assertValidSimulationMode } from "./reporting.js";
+import { applySimulationMetadata, assertValidSimulationMode } from "./simulation.js";
 import type { RemediateOptions, RemediationReport } from "./types.js";
 import { assertValidCveId } from "./validators.js";
 

@@ -1,8 +1,9 @@
 import { errorMessage } from "../../../shared/errors.js";
 import type { ScanReport } from "../contracts.js";
 import { remediate } from "../index.js";
-import { assertValidSimulationMode, buildSlaBreachSummary } from "../reporting.js";
+import { buildSlaBreachSummary } from "../reporting.js";
 import { remediateFromScan } from "../scan/index.js";
+import { assertValidSimulationMode } from "../simulation.js";
 import type { RemediateOptions, RemediationReport } from "../types.js";
 import { rankPortfolioTargets } from "./risk-score.js";
 import type { PortfolioReport, PortfolioTarget, PortfolioTargetResult } from "./types.js";

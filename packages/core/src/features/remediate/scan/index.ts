@@ -17,13 +17,10 @@ import {
   resolveProvenanceContext,
 } from "../context.js";
 import type { ScanOptions, ScanReport } from "../contracts.js";
-import {
-  assertValidSimulationMode,
-  buildEscalationCounts,
-  buildSlaBreachSummary,
-} from "../reporting.js";
+import { buildEscalationCounts, buildSlaBreachSummary } from "../reporting.js";
 import { executeScanRemediations } from "../scan-execution.js";
 import { buildScanOutcome } from "../scan-outcome.js";
+import { assertValidSimulationMode } from "../simulation.js";
 import type { RemediationReport } from "../types.js";
 import { aggregateScanLlmUsage } from "./report-metrics.js";
 

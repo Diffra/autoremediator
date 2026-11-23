@@ -2,10 +2,10 @@ import type { ScanReport } from "./contracts.js";
 import {
   buildDependencyScopeCounts,
   buildDispositionCounts,
-  buildSimulationSummary,
   buildStrategyCounts,
   buildUnresolvedReasonCounts,
 } from "./reporting.js";
+import { buildSimulationSummary } from "./simulation.js";
 import type { RemediationReport } from "./types.js";
 
 export interface ScanOutcome {
