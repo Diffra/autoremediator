@@ -310,12 +310,7 @@ export async function validatePatchWithTests(
       typeof err === "object" && err !== null && "stdout" in err
         ? (err as { stdout?: unknown }).stdout
         : "";
-    const errorOutput =
-      typeof stdoutVal === "string"
-        ? stdoutVal
-        : Buffer.isBuffer(stdoutVal)
-          ? stdoutVal.toString("utf8")
-          : "";
+    const errorOutput = outputText(stdoutVal);
     const failedTests = extractFailedTests(errorOutput);
 
     return {
@@ -344,4 +339,11 @@ function extractFailedTests(output: string): string[] {
   }
 
   return failedTests.slice(0, 5);
+}
+
+function outputText(value: unknown): string {
+  if (typeof value === "string") {
+    return value;
+  }
+  return Buffer.isBuffer(value) ? value.toString("utf8") : "";
 }

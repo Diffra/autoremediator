@@ -33,12 +33,12 @@ export async function runInteractiveTriage(
   inputPathOrOpts: string | Partial<InteractiveTriageOptions>,
   maybeOpts?: Partial<InteractiveTriageOptions>,
 ): Promise<void> {
-  const inputPath =
-    typeof inputPathOrOpts === "string"
-      ? inputPathOrOpts
-      : typeof inputPathOrOpts.input === "string"
-        ? inputPathOrOpts.input
-        : undefined;
+  let inputPath: string | undefined;
+  if (typeof inputPathOrOpts === "string") {
+    inputPath = inputPathOrOpts;
+  } else if (typeof inputPathOrOpts.input === "string") {
+    inputPath = inputPathOrOpts.input;
+  }
   const opts: Partial<InteractiveTriageOptions> =
     (typeof inputPathOrOpts === "object" ? inputPathOrOpts : maybeOpts) ?? {};
   const cwd = opts.cwd ?? process.cwd();

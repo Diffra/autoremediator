@@ -572,11 +572,12 @@ export async function applyPlan(
       if (ok) applied.add(item.itemId);
     }
 
-    const status: RunStatus = failure
-      ? "failed"
-      : plan.items.every((item) => applied.has(item.itemId))
-        ? "applied"
-        : "partial";
+    let status: RunStatus = "partial";
+    if (failure) {
+      status = "failed";
+    } else if (plan.items.every((item) => applied.has(item.itemId))) {
+      status = "applied";
+    }
     store.update(runId, { status, ...(failure ? { error: failure } : {}) });
     ledger.append("apply.end", { status });
 

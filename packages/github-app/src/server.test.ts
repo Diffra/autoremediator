@@ -79,12 +79,14 @@ globalThis.fetch = (async (
   input: Parameters<typeof fetch>[0],
   init?: Parameters<typeof fetch>[1],
 ) => {
-  const urlStr =
-    typeof input === "string"
-      ? input
-      : input instanceof URL
-        ? input.toString()
-        : (input as { url: string }).url;
+  let urlStr: string;
+  if (typeof input === "string") {
+    urlStr = input;
+  } else if (input instanceof URL) {
+    urlStr = input.toString();
+  } else {
+    urlStr = (input as { url: string }).url;
+  }
   for (const [baseUrl, srv] of serverMap.entries()) {
     if (urlStr.startsWith(baseUrl)) {
       const path = urlStr.slice(baseUrl.length);

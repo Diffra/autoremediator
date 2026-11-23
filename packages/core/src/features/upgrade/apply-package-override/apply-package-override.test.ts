@@ -128,12 +128,15 @@ describe("apply-package-override", () => {
     expect(result.applied).toBe(true);
   });
 
-  const pnpmLock = (withOverride: boolean) => (path: string) =>
-    path.endsWith("pnpm-lock.yaml")
-      ? `lockfileVersion: '9.0'\n${withOverride ? "overrides:\n  minimist: 1.2.8\n" : ""}`
-      : path.endsWith("pnpm-workspace.yaml")
-        ? "packages:\n  - '.' # keep me\n"
-        : JSON.stringify({ name: "demo-app" });
+  const pnpmLock = (withOverride: boolean) => (path: string) => {
+    if (path.endsWith("pnpm-lock.yaml")) {
+      return `lockfileVersion: '9.0'\n${withOverride ? "overrides:\n  minimist: 1.2.8\n" : ""}`;
+    }
+    if (path.endsWith("pnpm-workspace.yaml")) {
+      return "packages:\n  - '.' # keep me\n";
+    }
+    return JSON.stringify({ name: "demo-app" });
+  };
 
   it("on pnpm 11 and later writes overrides to pnpm-workspace.yaml, which that pnpm reads, and leaves package.json alone", async () => {
     mocked.getPnpmMajorVersion.mockResolvedValue(12);

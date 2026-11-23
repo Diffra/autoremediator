@@ -129,19 +129,15 @@ export async function runBisect(opts: BisectCliOptions): Promise<void> {
       ...(opts.packageManager
         ? { packageManager: opts.packageManager as "npm" | "pnpm" | "yarn" }
         : {}),
-      ...(opts.runScripts
-        ? { ignoreScripts: false }
-        : opts.ignoreScripts
-          ? { ignoreScripts: true }
-          : {}),
+      ...(opts.runScripts ? { ignoreScripts: false } : {}),
+      ...(opts.ignoreScripts && !opts.runScripts ? { ignoreScripts: true } : {}),
       ...(opts.apply ? { apply: true } : {}),
       signal: controller.signal,
     });
     if (opts.outputFormat === "json") logJson(report);
     else process.stdout.write(`${describeBisect(report)}\n`);
     const found = report.status === "culprit" || report.status === "culprit-set";
-    process.exitCode =
-      report.stopped === "interrupted" ? 130 : found ? EXIT_CODES.ok : EXIT_CODES.failed;
+    process.exitCode = bisectExitCode(report.stopped === "interrupted", found);
   } finally {
     process.off("SIGINT", interrupt);
     process.off("SIGTERM", interrupt);
@@ -189,4 +185,11 @@ export function registerBisectCommand(program: Command): void {
       validateOutputFormat(opts.outputFormat, ["text", "json"], "bisect");
       await runBisect(opts);
     });
+}
+
+function bisectExitCode(interrupted: boolean, found: boolean): number {
+  if (interrupted) {
+    return 130;
+  }
+  return found ? EXIT_CODES.ok : EXIT_CODES.failed;
 }

@@ -332,11 +332,13 @@ export async function bisectLockfile(
       pinned: readonly BisectedPackage[] | undefined,
     ): Promise<{ step: BisectStep; verdict: Verdict }> => {
       const stepNumber = steps.length + 1;
-      const base = {
-        step: stepNumber,
-        kind,
-        updated: pinned ? updatedNames(pinned) : kind === "bad-ref" ? updatedNames(updates) : [],
-      };
+      let updated: ReturnType<typeof updatedNames> = [];
+      if (pinned) {
+        updated = updatedNames(pinned);
+      } else if (kind === "bad-ref") {
+        updated = updatedNames(updates);
+      }
+      const base = { step: stepNumber, kind, updated };
       const done = (
         outcome: BisectStep["outcome"],
         phase: BisectStep["phase"],
@@ -395,11 +397,7 @@ export async function bisectLockfile(
         // we made up it only says the combination cannot be installed.
         return done(frozen ? "fail" : "unresolved", "install", tail(install.output, 1500), {
           install: installRecord,
-          note: install.timedOut
-            ? "install timed out"
-            : frozen
-              ? "install failed"
-              : "install failed in this combination of versions",
+          note: installFailureNote(install.timedOut, frozen),
         });
       }
 
@@ -613,4 +611,11 @@ export async function bisectLockfile(
     await Promise.allSettled(removers.map((remove) => remove()));
     liveRoots.clear();
   }
+}
+
+function installFailureNote(timedOut: boolean, frozen: boolean): string {
+  if (timedOut) {
+    return "install timed out";
+  }
+  return frozen ? "install failed" : "install failed in this combination of versions";
 }

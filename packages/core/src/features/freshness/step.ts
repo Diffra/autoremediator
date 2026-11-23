@@ -311,14 +311,7 @@ export async function applyFreshness(
     ]),
   ];
 
-  const status: ApplyFreshnessResult["status"] =
-    outcomes.length === 0
-      ? "nothing-to-do"
-      : failed === 0
-        ? "ok"
-        : applied === 0
-          ? "failed"
-          : "partial";
+  const status = applyStatus(outcomes.length, failed, applied);
   return {
     status,
     steps: outcomes,
@@ -384,4 +377,18 @@ async function openChangeRequest(
         outcome.message = `${outcome.message} Reinstall after returning to the base branch failed: ${errorMessage(error)}`;
       });
   }
+}
+
+function applyStatus(
+  total: number,
+  failed: number,
+  applied: number,
+): ApplyFreshnessResult["status"] {
+  if (total === 0) {
+    return "nothing-to-do";
+  }
+  if (failed === 0) {
+    return "ok";
+  }
+  return applied === 0 ? "failed" : "partial";
 }

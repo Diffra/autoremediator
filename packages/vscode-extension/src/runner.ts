@@ -77,12 +77,7 @@ export async function scanForVulns(cwd: string, force = false): Promise<VulnFind
     const auditFile = join(tmpdir(), `ar-audit-${randomBytes(16).toString("hex")}.json`);
 
     try {
-      const [auditBin, ...auditArgs]: [string, ...string[]] =
-        pm === "pnpm"
-          ? ["pnpm", "audit", "--json"]
-          : pm === "yarn"
-            ? ["yarn", "audit", "--json"]
-            : ["npm", "audit", "--json"];
+      const [auditBin, ...auditArgs] = auditCommandFor(pm);
 
       let auditOutput: string;
       try {
@@ -226,4 +221,11 @@ export function extractFindings(report: ScanReport): VulnFinding[] {
     }
   }
   return findings;
+}
+
+function auditCommandFor(pm: string): [string, ...string[]] {
+  if (pm === "pnpm" || pm === "yarn") {
+    return [pm, "audit", "--json"];
+  }
+  return ["npm", "audit", "--json"];
 }

@@ -122,7 +122,7 @@ export function comparePackageManifests(
           severity: conflict ? "breaking" : "possibly-breaking",
           reason: conflict
             ? `engines.node narrowed to "${newNode}" and the project declares engines.node "${projectNode}", which allows versions outside it`
-            : `engines.node ${oldNode === undefined ? "was unset and is now" : `changed from "${oldNode}" to`} "${newNode}"${projectNode ? "" : "; the project declares no engines.node"}${runtimeOk === undefined ? "" : runtimeOk ? `; Node ${runtimeNode} on this machine satisfies it` : `; Node ${runtimeNode} on this machine does NOT satisfy it`}`,
+            : `engines.node ${oldNode === undefined ? "was unset and is now" : `changed from "${oldNode}" to`} "${newNode}"${projectNode ? "" : "; the project declares no engines.node"}${runtimeNote(runtimeOk, runtimeNode)}`,
           before: oldNode,
           after: newNode,
           evidence: conflict ? "project-conflict" : "unresolved",
@@ -257,4 +257,13 @@ export function comparePackageManifests(
     }
   }
   return changes;
+}
+
+function runtimeNote(satisfied: boolean | undefined, runtimeNode: string): string {
+  if (satisfied === undefined) {
+    return "";
+  }
+  return satisfied
+    ? `; Node ${runtimeNode} on this machine satisfies it`
+    : `; Node ${runtimeNode} on this machine does NOT satisfy it`;
 }

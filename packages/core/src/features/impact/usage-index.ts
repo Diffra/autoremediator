@@ -259,13 +259,7 @@ function scanFile(index: UsageIndex, file: string, code: string): void {
           }
           const name = propertyName(property.key, property.computed === true);
           const target = property.value as AstNode | undefined;
-          const local =
-            target?.type === "Identifier"
-              ? String(target.name)
-              : target?.type === "AssignmentPattern" &&
-                  (target.left as AstNode | undefined)?.type === "Identifier"
-                ? String((target.left as AstNode).name)
-                : undefined;
+          const local = boundLocalName(target);
           if (name === undefined) {
             markOpaque(specifier, loadSite);
             continue;
@@ -394,7 +388,12 @@ function scanFile(index: UsageIndex, file: string, code: string): void {
       }
       const isCall = grand?.type === "CallExpression" && grand.callee === parent;
       const isNew = grand?.type === "NewExpression" && grand.callee === parent;
-      const kind: CallSiteKind = isCall ? "call" : isNew ? "new" : "member";
+      let kind: CallSiteKind = "member";
+      if (isCall) {
+        kind = "call";
+      } else if (isNew) {
+        kind = "new";
+      }
       const extra = isCall && grand ? { argCount: argCountOf(grand) } : {};
       if (binding.mode === "object") {
         useExport(binding.specifier, member, site(parent, kind, extra));
@@ -461,4 +460,14 @@ export function sitesForStaticMember(
 
 export function isUsed(index: UsageIndex, specifier: string): boolean {
   return index.specifiers.has(specifier);
+}
+
+/** The local name a destructured property binds (`{ a }`, `{ a = 1 }`), or undefined for a pattern. */
+function boundLocalName(target: AstNode | undefined): string | undefined {
+  if (target?.type === "Identifier") {
+    return String(target.name);
+  }
+  const left =
+    target?.type === "AssignmentPattern" ? (target.left as AstNode | undefined) : undefined;
+  return left?.type === "Identifier" ? String(left.name) : undefined;
 }

@@ -136,7 +136,7 @@ export async function remediatePortfolio(
     }
   }
 
-  const overallStatus = failedCount === 0 ? "ok" : successCount > 0 ? "partial" : "failed";
+  const overallStatus = overallStatusOf(failedCount, successCount);
 
   const allRemediationReports: RemediationReport[] = results.flatMap((r) => {
     if (r.remediationReport) return [r.remediationReport];
@@ -154,4 +154,11 @@ export async function remediatePortfolio(
     changeRequests: changeRequests.length > 0 ? changeRequests : undefined,
     slaBreachSummary: buildSlaBreachSummary(allRemediationReports),
   };
+}
+
+function overallStatusOf(failedCount: number, successCount: number): "ok" | "partial" | "failed" {
+  if (failedCount === 0) {
+    return "ok";
+  }
+  return successCount > 0 ? "partial" : "failed";
 }

@@ -9,6 +9,7 @@
  */
 import { satisfies, valid } from "semver";
 
+import { compareStrings } from "../../shared/text.js";
 import type { Recipe, RecipeHunk } from "./schema.js";
 
 export const MAX_FILES_CHANGED = 50;
@@ -206,9 +207,7 @@ export function planRecipe(recipe: Recipe, files: readonly SourceFile[]): Recipe
 
   const matches: RecipeMatch[] = [];
   const diffs: string[] = [];
-  for (const [path, entry] of [...edits.entries()].toSorted(([a], [b]) =>
-    a < b ? -1 : a > b ? 1 : 0,
-  )) {
+  for (const [path, entry] of [...edits.entries()].toSorted(([a], [b]) => compareStrings(a, b))) {
     // An insertion goes in before a replacement that starts at the same line.
     const sorted = entry.edits.toSorted(
       (a, b) => a.start - b.start || a.delLength - b.delLength || a.hunk - b.hunk,

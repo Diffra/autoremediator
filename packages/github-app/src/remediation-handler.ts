@@ -56,12 +56,12 @@ function readRepoFromPayload(
   const r = repository as Record<string, unknown>;
   const name = typeof r.name === "string" ? r.name : undefined;
   const ownerObj = r.owner;
-  const owner =
-    typeof ownerObj === "string"
-      ? ownerObj
-      : ownerObj && typeof ownerObj === "object"
-        ? ((ownerObj as Record<string, unknown>).login as string | undefined)
-        : undefined;
+  let owner: string | undefined;
+  if (typeof ownerObj === "string") {
+    owner = ownerObj;
+  } else if (ownerObj && typeof ownerObj === "object") {
+    owner = (ownerObj as Record<string, unknown>).login as string | undefined;
+  }
   if (!owner || !name) return undefined;
   return { owner, repo: name };
 }
@@ -189,17 +189,11 @@ export function createDefaultRemediationHandler(
     }
 
     const headSha =
-      typeof (payload.check_suite as Record<string, unknown> | undefined)?.head_sha === "string"
-        ? ((payload.check_suite as Record<string, unknown>).head_sha as string)
-        : typeof payload.after === "string"
-          ? payload.after
-          : undefined;
+      stringField(payload.check_suite, "head_sha") ??
+      (typeof payload.after === "string" ? payload.after : undefined);
     const branchOrRef =
-      typeof (payload.check_suite as Record<string, unknown> | undefined)?.head_branch === "string"
-        ? ((payload.check_suite as Record<string, unknown>).head_branch as string)
-        : typeof payload.ref === "string"
-          ? payload.ref.replace(/^refs\/heads\//, "")
-          : undefined;
+      stringField(payload.check_suite, "head_branch") ??
+      (typeof payload.ref === "string" ? payload.ref.replace(/^refs\/heads\//, "") : undefined);
     const targetRef = headSha ?? branchOrRef;
 
     let isolatedWorkspaceDir: string | undefined;
@@ -899,15 +893,7 @@ async function runCommand(
 
 async function collectAuditFindings(cwd: string): Promise<ParsedAuditFinding[]> {
   const packageManager = await detectPackageManager(cwd);
-  const commands: Array<[string, string[]]> =
-    packageManager === "yarn"
-      ? [
-          ["yarn", ["npm", "audit", "--json"]],
-          ["yarn", ["audit", "--json"]],
-        ]
-      : packageManager === "pnpm"
-        ? [["pnpm", ["audit", "--json"]]]
-        : [["npm", ["audit", "--json"]]];
+  const commands = auditCommandsFor(packageManager);
 
   let lastError = "No audit output received.";
 
@@ -968,4 +954,24 @@ function createSarifFromCves(cveIds: string[]): Record<string, unknown> {
       },
     ],
   };
+}
+
+function stringField(value: unknown, key: string): string | undefined {
+  if (typeof value !== "object" || value === null) {
+    return undefined;
+  }
+  const field = (value as Record<string, unknown>)[key];
+  return typeof field === "string" ? field : undefined;
+}
+
+function auditCommandsFor(packageManager: string): Array<[string, string[]]> {
+  if (packageManager === "yarn") {
+    return [
+      ["yarn", ["npm", "audit", "--json"]],
+      ["yarn", ["audit", "--json"]],
+    ];
+  }
+  return packageManager === "pnpm"
+    ? [["pnpm", ["audit", "--json"]]]
+    : [["npm", ["audit", "--json"]]];
 }

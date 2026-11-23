@@ -215,11 +215,13 @@ export function createBuiltinReproductionAgent(model: LanguageModel): Reproducti
         });
         steps = result.steps;
       } catch (error) {
-        failure = env.signal.aborted
-          ? "cancelled"
-          : signal.aborted
-            ? "the time limit was reached"
-            : `the model call failed: ${errorMessage(error)}`;
+        if (env.signal.aborted) {
+          failure = "cancelled";
+        } else if (signal.aborted) {
+          failure = "the time limit was reached";
+        } else {
+          failure = `the model call failed: ${errorMessage(error)}`;
+        }
       }
 
       const usage = [

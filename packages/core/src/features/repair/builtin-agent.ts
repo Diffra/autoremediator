@@ -139,11 +139,7 @@ export function createBuiltinRepairAgent(model: LanguageModel): RepairAgent {
         });
         steps = result.steps;
       } catch (error) {
-        failure = env.signal.aborted
-          ? "the attempt was cancelled"
-          : signal.aborted
-            ? "the time limit for this round was reached"
-            : `the model call failed: ${errorMessage(error)}`;
+        failure = describeModelFailure(error, env.signal, signal);
       }
 
       proposalsByAttempt.set(task.attemptId, state.memoryProposals ?? 0);
@@ -173,4 +169,14 @@ export function createBuiltinRepairAgent(model: LanguageModel): RepairAgent {
       };
     },
   };
+}
+
+function describeModelFailure(error: unknown, attempt: AbortSignal, round: AbortSignal): string {
+  if (attempt.aborted) {
+    return "the attempt was cancelled";
+  }
+  if (round.aborted) {
+    return "the time limit for this round was reached";
+  }
+  return `the model call failed: ${errorMessage(error)}`;
 }

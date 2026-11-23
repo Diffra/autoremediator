@@ -139,16 +139,7 @@ export function resolveListCommand(
     return [];
   }
 
-  const base =
-    pm === "pnpm"
-      ? ["pnpm", "list", "--json", "--depth", "99"]
-      : pm === "yarn"
-        ? ["yarn", "list", "--json"]
-        : pm === "bun"
-          ? ["bun", "pm", "ls", "--all"]
-          : ["npm", "list", "--json", "--all"];
-
-  return withWorkspace(base, pm, constraints?.workspace);
+  return withWorkspace(listCommandFor(pm), pm, constraints?.workspace);
 }
 
 /**
@@ -160,16 +151,7 @@ export function resolveTestCommand(
   pm: PackageManager,
   constraints?: RemediationConstraints,
 ): string[] {
-  const base =
-    pm === "pnpm"
-      ? ["pnpm", "test"]
-      : pm === "yarn"
-        ? ["yarn", "test"]
-        : pm === "bun"
-          ? ["bun", "test"]
-          : pm === "deno"
-            ? ["deno", "test"]
-            : ["npm", "test"];
+  const base = testCommandFor(pm);
   return withWorkspace(base, pm, constraints?.workspace);
 }
 
@@ -299,4 +281,18 @@ export function getPackageManagerCommands(pm: PackageManager): PackageManagerCom
 
 export function parseListOutput(pm: PackageManager, stdout: string): InstalledVersions {
   return parsePackageManagerListOutput(pm, stdout);
+}
+
+function listCommandFor(pm: PackageManager): string[] {
+  if (pm === "pnpm") {
+    return ["pnpm", "list", "--json", "--depth", "99"];
+  }
+  if (pm === "yarn") {
+    return ["yarn", "list", "--json"];
+  }
+  return pm === "bun" ? ["bun", "pm", "ls", "--all"] : ["npm", "list", "--json", "--all"];
+}
+
+function testCommandFor(pm: PackageManager): string[] {
+  return [pm, "test"];
 }

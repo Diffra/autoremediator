@@ -84,11 +84,12 @@ export function parseNpmLock(content: string, manifest: ManifestDeps = {}): Lock
   const data: unknown = JSON.parse(content);
   if (!isRecord(data)) throw new Error("package-lock.json is not a JSON object");
 
-  const entries = isRecord(data["packages"])
-    ? fromPackages(data["packages"])
-    : isRecord(data["dependencies"])
-      ? fromNestedTree(data["dependencies"])
-      : new Map<string, RawEntry>();
+  let entries = new Map<string, RawEntry>();
+  if (isRecord(data["packages"])) {
+    entries = fromPackages(data["packages"]);
+  } else if (isRecord(data["dependencies"])) {
+    entries = fromNestedTree(data["dependencies"]);
+  }
 
   const resolve = (from: string, name: string): string | undefined => {
     for (const location of searchLocations(from)) {

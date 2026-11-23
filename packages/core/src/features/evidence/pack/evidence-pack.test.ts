@@ -93,12 +93,7 @@ describe("DSSE signing", () => {
   const keyFile = (
     type: "ed25519" | "p256" | "p384" | "rsa",
   ): { path: string; publicKey: KeyObject } => {
-    const pair =
-      type === "ed25519"
-        ? generateKeyPairSync("ed25519")
-        : type === "rsa"
-          ? generateKeyPairSync("rsa", { modulusLength: 2048 })
-          : generateKeyPairSync("ec", { namedCurve: type === "p256" ? "prime256v1" : "secp384r1" });
+    const pair = generatePair(type);
     const path = join(dir, `${type}.pem`);
     writeFileSync(path, pair.privateKey.export({ type: "pkcs8", format: "pem" }));
     return { path, publicKey: pair.publicKey };
@@ -123,7 +118,7 @@ describe("DSSE signing", () => {
         `DSSEv1 ${type16} ${INTOTO_PAYLOAD_TYPE} ${bytes.length} ${body}`,
         "utf8",
       );
-      const hash = type === "ed25519" ? null : type === "p256" ? "sha256" : "sha384";
+      const hash = DIGEST_OF_KEY_TYPE[type];
       expect(
         cryptoVerify(hash, manual, publicKey, Buffer.from(envelope.signatures[0]!.sig, "base64")),
       ).toBe(true);
@@ -1023,3 +1018,18 @@ describe("toCycloneDxVex 1.6", () => {
     expectValid(validate, unresolved);
   });
 });
+
+type KeyType = "ed25519" | "p256" | "p384" | "rsa";
+
+/** The digest each key type signs with; ed25519 hashes internally. */
+const DIGEST_OF_KEY_TYPE = { ed25519: null, p256: "sha256", p384: "sha384" } as const;
+
+function generatePair(type: KeyType): { publicKey: KeyObject; privateKey: KeyObject } {
+  if (type === "ed25519") {
+    return generateKeyPairSync("ed25519");
+  }
+  if (type === "rsa") {
+    return generateKeyPairSync("rsa", { modulusLength: 2048 });
+  }
+  return generateKeyPairSync("ec", { namedCurve: type === "p256" ? "prime256v1" : "secp384r1" });
+}

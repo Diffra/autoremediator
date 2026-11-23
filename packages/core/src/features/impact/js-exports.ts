@@ -6,6 +6,7 @@
 import {
   canonicalForm,
   isNode,
+  memberKindOfMethod,
   nameOfNode,
   parseSource,
   propertyName,
@@ -126,14 +127,7 @@ function membersOfClass(cls: AstNode): ClassMemberInfo[] {
       members.push({
         name: kind === "constructor" ? "constructor" : name,
         static: isStatic,
-        kind:
-          kind === "constructor"
-            ? "constructor"
-            : kind === "get"
-              ? "getter"
-              : kind === "set"
-                ? "setter"
-                : "method",
+        kind: memberKindOfMethod(kind),
         params: isFunctionNode(value) ? paramsOfFunction(value) : undefined,
         fingerprint: value ? canonicalForm(value).fingerprint : "",
       });
@@ -330,11 +324,7 @@ export function analyzeModule(path: string, code: string): ModuleInfo | undefine
       };
     }
     const form = canonicalForm(expression, placeholder);
-    const kind: DefinitionKind = isFunctionNode(expression)
-      ? "function"
-      : isClassNode(expression)
-        ? "class"
-        : "value";
+    const kind = definitionKindOf(expression);
     return {
       name: exportName,
       kind,
@@ -613,4 +603,11 @@ export function analyzeModule(path: string, code: string): ModuleInfo | undefine
     relativeImports: [...relativeImports].toSorted(),
     discovery,
   };
+}
+
+function definitionKindOf(expression: AstNode): DefinitionKind {
+  if (isFunctionNode(expression)) {
+    return "function";
+  }
+  return isClassNode(expression) ? "class" : "value";
 }

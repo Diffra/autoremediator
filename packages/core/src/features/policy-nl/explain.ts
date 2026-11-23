@@ -213,7 +213,7 @@ export function explainPolicy(options: ExplainPolicyOptions = {}): ExplainPolicy
   const inline = explicit !== undefined && /^(?:\{|---)/.test(explicit.trim());
   const path = inline ? undefined : resolve(cwd, explicit ?? join(".github", "autoremediator.yml"));
   const exists = inline || (path !== undefined && existsSync(path));
-  const policy = loadPolicy(cwd, inline ? explicit : explicit === undefined ? undefined : path);
+  const policy = loadPolicy(cwd, inline || explicit === undefined ? explicit : path);
   const rules = describePolicy(policy);
   return {
     source: inline ? "(inline policy)" : (explicit ?? join(".github", "autoremediator.yml")),

@@ -82,10 +82,11 @@ async function headSha(project: Project, env: NodeJS.ProcessEnv): Promise<string
 function canonical(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map((entry) => canonical(entry)).join(",")}]`;
   if (value !== null && typeof value === "object") {
-    return `{${Object.entries(value as Record<string, unknown>)
-      .toSorted(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
-      .map(([key, entry]) => `${JSON.stringify(key)}:${canonical(entry)}`)
-      .join(",")}}`;
+    const record = value as Record<string, unknown>;
+    const entries = Object.keys(record)
+      .toSorted()
+      .map((key) => `${JSON.stringify(key)}:${canonical(record[key])}`);
+    return `{${entries.join(",")}}`;
   }
   return JSON.stringify(value) ?? "null";
 }
@@ -350,12 +351,7 @@ export async function judge(
       {
         name: "reason",
         ok: reasonOk,
-        detail:
-          reason === undefined
-            ? "no particular reason required"
-            : reasonOk
-              ? `reported ${reason}`
-              : `expected ${reason}, reported ${observed.unresolvedReasons.join(", ") || "nothing"}`,
+        detail: reasonDetail(reason, reasonOk, observed.unresolvedReasons),
       },
     );
     if (canary !== undefined) {
@@ -381,4 +377,18 @@ export async function judge(
   }
 
   return { score: pass ? "PASS" : "FAIL", outcome, checks, changedFiles: changed.length };
+}
+
+function reasonDetail(
+  reason: string | undefined,
+  reasonOk: boolean,
+  reported: readonly string[],
+): string {
+  if (reason === undefined) {
+    return "no particular reason required";
+  }
+  if (reasonOk) {
+    return `reported ${reason}`;
+  }
+  return `expected ${reason}, reported ${reported.join(", ") || "nothing"}`;
 }

@@ -254,12 +254,8 @@ export async function premortem(options: PremortemOptions): Promise<PremortemRep
         repo: scan.repo.label,
         versions: [...new Set(found.map((entry) => entry.version))].toSorted(),
         direct: found.some((entry) => entry.direct),
-        scope: scopes.has("production")
-          ? "production"
-          : scopes.has("development")
-            ? "development"
-            : "unreferenced",
-        installScript: scripts.has(true) ? true : scripts.has("unknown") ? "unknown" : false,
+        scope: strongestScope(scopes),
+        installScript: combinedInstallScript(scripts),
       });
     }
     return {
@@ -323,4 +319,20 @@ export async function premortem(options: PremortemOptions): Promise<PremortemRep
     writeFileSync(join(dir, "premortem.json"), `${JSON.stringify(report, null, 2)}\n`, "utf8");
   }
   return report;
+}
+
+function strongestScope(
+  scopes: ReadonlySet<string>,
+): "production" | "development" | "unreferenced" {
+  if (scopes.has("production")) {
+    return "production";
+  }
+  return scopes.has("development") ? "development" : "unreferenced";
+}
+
+function combinedInstallScript(scripts: ReadonlySet<boolean | "unknown">): boolean | "unknown" {
+  if (scripts.has(true)) {
+    return true;
+  }
+  return scripts.has("unknown") ? "unknown" : false;
 }

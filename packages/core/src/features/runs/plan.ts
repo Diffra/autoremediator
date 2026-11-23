@@ -1,10 +1,9 @@
 import semver from "semver";
 
 import type { RemediationConstraints } from "../../infra/policy/types.js";
-import { sha256 } from "../../shared/hash.js";
+import { canonicalJson, sha256 } from "../../shared/hash.js";
 import type { RemediationReport } from "../remediate/types.js";
 import type { RepoFingerprint } from "./fingerprint.js";
-import { canonicalJson } from "./hash.js";
 
 /** The options a plan needs to be applied exactly as it was previewed. */
 export interface PlanOptions {

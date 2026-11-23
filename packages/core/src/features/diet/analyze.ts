@@ -25,6 +25,8 @@ import {
   type TokenIndex,
 } from "./unused.js";
 
+type Elsewhere = Parameters<typeof classifyDependencies>[0]["elsewhere"];
+
 interface Target {
   name: string;
   dir: string;
@@ -111,21 +113,22 @@ export async function analyzeDependencies(
 
     // Other packages of the workspace: the root's dependencies are usually used from a member, and
     // a member is covered by the root's scripts and configuration.
-    const elsewhere = isRootOfWorkspace
-      ? targets.slice(1).map((member) => ({
-          usage: scans.get(member.dir)!.usage,
-          index: scans.get(member.dir)!.index,
-          packageName: member.name,
-        }))
-      : isWorkspace
-        ? [
-            {
-              usage: emptyUsage(),
-              index: rootScan.index,
-              packageName: `${rootManifest.name ?? "the workspace root"} (root scripts and configuration)`,
-            },
-          ]
-        : undefined;
+    let elsewhere: Elsewhere;
+    if (isRootOfWorkspace) {
+      elsewhere = targets.slice(1).map((member) => ({
+        usage: scans.get(member.dir)!.usage,
+        index: scans.get(member.dir)!.index,
+        packageName: member.name,
+      }));
+    } else if (isWorkspace) {
+      elsewhere = [
+        {
+          usage: emptyUsage(),
+          index: rootScan.index,
+          packageName: `${rootManifest.name ?? "the workspace root"} (root scripts and configuration)`,
+        },
+      ];
+    }
 
     const classified = classifyDependencies({
       packageDir: target.dir,

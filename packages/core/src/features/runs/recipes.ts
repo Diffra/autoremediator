@@ -33,11 +33,7 @@ export function breakingFrom(
       for (const diagnostic of parseCompilerDiagnostics(failure.details.join("\n"))) {
         const symbol = diagnostic.missingMember ?? diagnostic.suggestedSymbol;
         add({
-          kind: diagnostic.missingMember
-            ? "symbol-removed"
-            : diagnostic.code
-              ? `diagnostic-${diagnostic.code}`
-              : "diagnostic",
+          kind: breakingKindOf(diagnostic),
           ...(symbol ? { symbol: symbol.slice(0, 200) } : {}),
           message: diagnostic.message.slice(0, 300),
         });
@@ -141,4 +137,11 @@ export function hasRecipeFor(
   } catch {
     return false;
   }
+}
+
+function breakingKindOf(diagnostic: { missingMember?: string; code?: string | number }): string {
+  if (diagnostic.missingMember) {
+    return "symbol-removed";
+  }
+  return diagnostic.code ? `diagnostic-${diagnostic.code}` : "diagnostic";
 }

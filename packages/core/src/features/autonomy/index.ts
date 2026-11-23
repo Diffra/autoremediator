@@ -193,11 +193,12 @@ export function assertAutonomyAllows(
   const { evaluation, level } = levelOfState(state, now);
   if (LEVEL_ALLOWS[level][action]) return;
 
-  const why = state.recordError
-    ? state.recordError
-    : level === state.config.ceiling && level !== evaluation.earned
+  const cappedByPolicy = level === state.config.ceiling && level !== evaluation.earned;
+  const why =
+    state.recordError ||
+    (cappedByPolicy
       ? `the policy ceiling is ${state.config.ceiling}`
-      : (evaluation.reasons[0] ?? "see the track record");
+      : (evaluation.reasons[0] ?? "see the track record"));
   throw new AutonomyRefusedError(
     `${what} refused: autonomy is ${level} (${LEVEL_NAMES[level]}), which does not allow ${action === "apply" ? "changing the project" : "recording plans"}. ` +
       `Ceiling ${state.config.ceiling}, earned ${evaluation.earned}: ${why}. ` +

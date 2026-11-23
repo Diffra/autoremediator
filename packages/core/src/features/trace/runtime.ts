@@ -163,12 +163,12 @@ export function installTraceHook(options: TraceHookOptions): void {
 
   const noteFormat = (file: string, format: string | null | undefined): void => {
     // A require() of a CommonJS file reports no format at all.
-    const known: ModuleFormat | undefined =
-      format === "module"
-        ? "esm"
-        : format === "commonjs" || (format == null && /\.c?js$/.test(file))
-          ? "cjs"
-          : undefined;
+    let known: ModuleFormat | undefined;
+    if (format === "module") {
+      known = "esm";
+    } else if (format === "commonjs" || (format == null && /\.c?js$/.test(file))) {
+      known = "cjs";
+    }
     if (!known || internal) return;
     const located = locatePackageFile(file);
     if (!located) return;
@@ -333,12 +333,14 @@ export function installTraceHook(options: TraceHookOptions): void {
           if (!isEntry && !visible) return result;
 
           const raw = result.source;
-          const text =
-            typeof raw === "string"
-              ? raw
-              : ArrayBuffer.isView(raw)
-                ? Buffer.from(raw.buffer, raw.byteOffset, raw.byteLength).toString("utf8")
-                : Buffer.from(raw).toString("utf8");
+          let text: string;
+          if (typeof raw === "string") {
+            text = raw;
+          } else if (ArrayBuffer.isView(raw)) {
+            text = Buffer.from(raw.buffer, raw.byteOffset, raw.byteLength).toString("utf8");
+          } else {
+            text = Buffer.from(raw).toString("utf8");
+          }
           const state = stateFor(located);
           internal = true;
           let outcome: ReturnType<typeof instrumentEsModule>;

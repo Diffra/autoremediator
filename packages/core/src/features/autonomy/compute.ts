@@ -257,11 +257,8 @@ export function evaluate(
   const stats = windowStats(events, config);
   const requirements = requirementsFor(stats, config);
 
-  const fromWindow: AutonomyLevel = meets(requirements.L4)
-    ? "L4"
-    : meets(requirements.L3)
-      ? "L3"
-      : BASE_EARNED_LEVEL;
+  const fromWindow: AutonomyLevel =
+    (["L4", "L3"] as const).find((level) => meets(requirements[level])) ?? BASE_EARNED_LEVEL;
   const cap = capFor(events, config, now.getTime());
   const earned = cap ? minLevel(fromWindow, cap.level) : fromWindow;
 
@@ -482,12 +479,17 @@ export function signalsFor(level: AutonomyLevel, facts: OutcomeFacts): LevelSign
   return {
     autoMergeEligible: clean,
     escalate: !clean || facts.anyMajorBump,
-    note: clean
-      ? facts.anyMajorBump
-        ? "L4: verified, but a major version bump is escalated to a person"
-        : "L4: every change was verified"
-      : "L4: the run was not fully applied and verified, so it is escalated to a person",
+    note: fullAutonomyNote(clean, facts.anyMajorBump),
   };
+}
+
+function fullAutonomyNote(clean: boolean, anyMajorBump: boolean): string {
+  if (!clean) {
+    return "L4: the run was not fully applied and verified, so it is escalated to a person";
+  }
+  return anyMajorBump
+    ? "L4: verified, but a major version bump is escalated to a person"
+    : "L4: every change was verified";
 }
 
 export const allows = (level: AutonomyLevel) => LEVEL_ALLOWS[level];

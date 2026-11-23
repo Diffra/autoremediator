@@ -6,6 +6,19 @@ import { createHash } from "node:crypto";
 
 import { parseSync } from "oxc-parser";
 
+/** The kind of a class member written as a method definition (`get x()`, `set x(v)`, `constructor()`). */
+export function memberKindOfMethod(
+  methodKind: string,
+): "constructor" | "getter" | "setter" | "method" {
+  if (methodKind === "constructor") {
+    return "constructor";
+  }
+  if (methodKind === "get") {
+    return "getter";
+  }
+  return methodKind === "set" ? "setter" : "method";
+}
+
 export interface AstNode {
   type: string;
   start: number;

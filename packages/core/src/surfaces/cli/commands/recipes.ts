@@ -76,8 +76,7 @@ export function addRecipesCommand(program: Command): void {
       if (opts.outputFormat === "json") return logJson(listing);
       if (listing.recipes.length === 0) out("No recipes.");
       for (const entry of listing.recipes) {
-        const applies =
-          entry.applies === undefined ? "" : entry.applies ? "  [applies]" : "  [does not apply]";
+        const applies = appliesLabel(entry.applies);
         out(
           `${entry.id}  ${entry.package} ${entry.fromRange} -> ${entry.toRange}  ${entry.hunks} hunk(s)  ${sourceLabel(entry.source)}${applies}`,
         );
@@ -199,4 +198,11 @@ export function addRecipesCommand(program: Command): void {
       out("Review them, then publish with `npm publish` from that directory.");
     }),
   );
+}
+
+function appliesLabel(applies: boolean | undefined): string {
+  if (applies === undefined) {
+    return "";
+  }
+  return applies ? "  [applies]" : "  [does not apply]";
 }

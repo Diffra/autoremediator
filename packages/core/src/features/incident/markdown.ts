@@ -42,12 +42,7 @@ function occurrenceRow(name: string, occurrence: Occurrence): string {
     occurrence.via.length > 0
       ? occurrence.via.map((hop) => code(hop)).join(" → ")
       : "nothing the manifests ask for leads here";
-  const scripts =
-    occurrence.installScript === "unknown"
-      ? "unknown"
-      : occurrence.installScript
-        ? "**yes**"
-        : "no";
+  const scripts = installScriptLabel(occurrence.installScript);
   return `| ${code(`${name}@${occurrence.version}`)} | ${occurrence.scope} | ${kind} | ${via} | ${scripts} | ${code(occurrence.lockfile)} |`;
 }
 
@@ -56,12 +51,12 @@ function windowLines(window: VersionWindow): string[] {
     window.entered.length > 0
       ? window.entered.map((commit) => commitText(commit)).join(", ")
       : "before the history that was read";
-  const left =
-    window.left.length > 0
-      ? window.left.map((commit) => commitText(commit)).join(", ")
-      : window.presentAtHead
-        ? "**still present at HEAD**"
-        : "not found leaving";
+  let left = "not found leaving";
+  if (window.left.length > 0) {
+    left = window.left.map((commit) => commitText(commit)).join(", ");
+  } else if (window.presentAtHead) {
+    left = "**still present at HEAD**";
+  }
   return [
     `- ${code(window.version)} in ${code(window.lockfile)}`,
     `  - entered: ${entered}`,
@@ -99,14 +94,7 @@ export function renderIncidentMarkdown(report: IncidentReport): string {
 
   const everPresent = report.history?.packages.some((entry) => entry.windows.length > 0) ?? false;
   out_("## Summary", "");
-  out_(
-    exposure.exposed
-      ? "- **An affected version is locked or installed in this project now.**"
-      : everPresent
-        ? "- No affected version is locked now, but one was in this repository's history (see History)."
-        : "- No affected version is locked here, and none was found in the lockfile history that was read.",
-    "",
-  );
+  out_(exposureLine(exposure.exposed, everPresent), "");
 
   out_("## 1. Exposure now", "");
   const anyOccurrence = exposure.packages.some((entry) => entry.occurrences.length > 0);
@@ -275,4 +263,20 @@ export function renderIncidentMarkdown(report: IncidentReport): string {
     out_("");
   }
   return `${out.join("\n").trimEnd()}\n`;
+}
+
+function installScriptLabel(value: boolean | "unknown"): string {
+  if (value === "unknown") {
+    return "unknown";
+  }
+  return value ? "**yes**" : "no";
+}
+
+function exposureLine(exposed: boolean, everPresent: boolean): string {
+  if (exposed) {
+    return "- **An affected version is locked or installed in this project now.**";
+  }
+  return everPresent
+    ? "- No affected version is locked now, but one was in this repository's history (see History)."
+    : "- No affected version is locked here, and none was found in the lockfile history that was read.";
 }

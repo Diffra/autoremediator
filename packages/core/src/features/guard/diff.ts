@@ -123,7 +123,14 @@ export async function guardGitDiff(
     baseRef,
     checked: reports.length,
     skipped,
-    verdict: code === 4 ? "block" : code === 3 ? "warn" : "allow",
+    verdict: verdictOfExitCode(code),
     reports,
   };
+}
+
+function verdictOfExitCode(code: number): "block" | "warn" | "allow" {
+  if (code === 4) {
+    return "block";
+  }
+  return code === 3 ? "warn" : "allow";
 }

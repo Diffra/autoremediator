@@ -11,7 +11,7 @@
 import { validRange } from "semver";
 import { z } from "zod";
 
-import { sha256 } from "../../shared/hash.js";
+import { canonicalJson, sha256 } from "../../shared/hash.js";
 
 export const RECIPE_SCHEMA_VERSION = 1;
 
@@ -130,18 +130,6 @@ export function parseRecipe(text: string): Recipe {
   return parsed.data;
 }
 
-function canonical(value: unknown): string {
-  if (Array.isArray(value)) return `[${value.map((item) => canonical(item)).join(",")}]`;
-  if (value && typeof value === "object") {
-    return `{${Object.entries(value as Record<string, unknown>)
-      .filter(([, item]) => item !== undefined)
-      .toSorted(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
-      .map(([key, item]) => `${JSON.stringify(key)}:${canonical(item)}`)
-      .join(",")}}`;
-  }
-  return JSON.stringify(value);
-}
-
 /**
  * A stable id from what the recipe does (its package, ranges and hunks), not from who captured it:
  * the same change captured twice is the same recipe.
@@ -154,7 +142,7 @@ export function recipeId(recipe: Recipe): string {
     breaking: _breaking,
     ...essence
   } = recipe;
-  return `${recipe.package}#${sha256(canonical(essence)).slice(0, 10)}`;
+  return `${recipe.package}#${sha256(canonicalJson(essence)).slice(0, 10)}`;
 }
 
 export function serializeRecipe(recipe: Recipe): string {

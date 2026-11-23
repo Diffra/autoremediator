@@ -68,12 +68,7 @@ export function activate(context: vscode.ExtensionContext): void {
 
       try {
         const delta = await scanGitDelta(cwd, "HEAD");
-        const icon =
-          delta.netRiskVerdict === "degraded"
-            ? "⚠️"
-            : delta.netRiskVerdict === "improved"
-              ? "✅"
-              : "ℹ️";
+        const icon = verdictIcon(delta.netRiskVerdict);
         void vscode.window.showInformationMessage(`Autoremediator Delta: ${icon} ${delta.summary}`);
       } catch (err: unknown) {
         void vscode.window.showErrorMessage(
@@ -182,12 +177,7 @@ function buildDiagnostics(doc: vscode.TextDocument, findings: VulnFinding[]): vs
     const range = findPackageRange(text, doc, finding.packageName);
     if (!range) continue;
 
-    const severity =
-      finding.severity === "CRITICAL" || finding.severity === "HIGH"
-        ? vscode.DiagnosticSeverity.Error
-        : finding.severity === "MEDIUM"
-          ? vscode.DiagnosticSeverity.Warning
-          : vscode.DiagnosticSeverity.Information;
+    const severity = diagnosticSeverityOf(finding.severity);
 
     const kevText = finding.inCisaKev ? " [🚨 CISA KEV Exploited]" : "";
     const epssText = finding.epssScore ? ` [EPSS ${(finding.epssScore * 100).toFixed(1)}%]` : "";
@@ -351,4 +341,20 @@ class PackageCodeLensProvider implements vscode.CodeLensProvider {
 
     return lenses;
   }
+}
+
+function diagnosticSeverityOf(severity: string): vscode.DiagnosticSeverity {
+  if (severity === "CRITICAL" || severity === "HIGH") {
+    return vscode.DiagnosticSeverity.Error;
+  }
+  return severity === "MEDIUM"
+    ? vscode.DiagnosticSeverity.Warning
+    : vscode.DiagnosticSeverity.Information;
+}
+
+function verdictIcon(verdict: string): string {
+  if (verdict === "degraded") {
+    return "⚠️";
+  }
+  return verdict === "improved" ? "✅" : "ℹ️";
 }

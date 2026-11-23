@@ -217,7 +217,12 @@ function collect(program: AstNode, context: Context): Finding[] {
           if (literal !== undefined && PROTO_NAMES.has(literal)) add("prototype-guard-added", node);
         }
         if ([">", ">=", "<", "<="].includes(operator)) {
-          const other = lengthMember(left) ? right : lengthMember(right) ? left : undefined;
+          let other: typeof left | undefined;
+          if (lengthMember(left)) {
+            other = right;
+          } else if (lengthMember(right)) {
+            other = left;
+          }
           if (other) {
             const limitIdentifier =
               other.type === "Identifier" && LIMIT_NAME.test(String(other.name));

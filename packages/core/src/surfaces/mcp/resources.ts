@@ -143,16 +143,15 @@ export function readResource(uri: string, context: ResourceContext) {
     ];
     const body = readAttemptArtifact({ cwd, runId, attemptId, artifact });
     if (body === undefined) throw new Error(`Attempt ${attemptId} has no ${artifact}.`);
-    return text(
-      uri,
-      artifact === "diff"
-        ? "text/x-diff"
-        : artifact === "transcript"
-          ? "application/jsonl"
-          : "application/json",
-      body,
-    );
+    return text(uri, mimeTypeOf(artifact), body);
   }
 
   throw new Error(`Unknown resource: ${uri}`);
+}
+
+function mimeTypeOf(artifact: string): string {
+  if (artifact === "diff") {
+    return "text/x-diff";
+  }
+  return artifact === "transcript" ? "application/jsonl" : "application/json";
 }

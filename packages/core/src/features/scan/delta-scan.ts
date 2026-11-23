@@ -359,12 +359,12 @@ export async function scanDelta(options: DeltaScanOptions = {}): Promise<DeltaSc
     status = "improved";
   }
 
-  const summary =
-    introducedFindings.length > 0
-      ? `Delta scan against ${baseRef} found ${introducedFindings.length} newly introduced vulnerability(ies) across ${dependencyChanges.length} dependency change(s) (net risk: degraded).`
-      : resolvedFindings.length > 0
-        ? `Delta scan against ${baseRef} resolved ${resolvedFindings.length} vulnerability(ies) across ${dependencyChanges.length} dependency change(s) (net risk: improved).`
-        : `Delta scan against ${baseRef} found 0 new vulnerabilities across ${dependencyChanges.length} dependency change(s) (net risk: neutral).`;
+  const summary = summarizeDelta(
+    baseRef,
+    introducedFindings.length,
+    resolvedFindings.length,
+    dependencyChanges.length,
+  );
 
   return {
     schemaVersion: "1.0",
@@ -379,4 +379,21 @@ export async function scanDelta(options: DeltaScanOptions = {}): Promise<DeltaSc
     summary,
     generatedAt: new Date().toISOString(),
   };
+}
+
+function summarizeDelta(
+  baseRef: string,
+  introduced: number,
+  resolved: number,
+  changes: number,
+): string {
+  const prefix = `Delta scan against ${baseRef}`;
+  const across = `across ${changes} dependency change(s)`;
+  if (introduced > 0) {
+    return `${prefix} found ${introduced} newly introduced vulnerability(ies) ${across} (net risk: degraded).`;
+  }
+  if (resolved > 0) {
+    return `${prefix} resolved ${resolved} vulnerability(ies) ${across} (net risk: improved).`;
+  }
+  return `${prefix} found 0 new vulnerabilities ${across} (net risk: neutral).`;
 }

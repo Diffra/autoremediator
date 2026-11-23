@@ -614,12 +614,7 @@ export function createGitHubAppServer(options: ServerOptions): Server {
 
   const remediationHandler = normalizedOptions.onRemediationRequested;
 
-  const queue =
-    normalizedOptions.enableJobQueue === false
-      ? createInMemoryJobQueue()
-      : normalizedOptions.dataDir
-        ? createFileBackedJobQueue(join(normalizedOptions.dataDir, "job-queue.json"))
-        : createInMemoryJobQueue();
+  const queue = createQueue(normalizedOptions.enableJobQueue, normalizedOptions.dataDir);
 
   const statusPublisherTokenProvider =
     normalizedOptions.appId && normalizedOptions.privateKey
@@ -898,4 +893,11 @@ export function createGitHubAppServer(options: ServerOptions): Server {
   });
 
   return server;
+}
+
+function createQueue(enableJobQueue: boolean | undefined, dataDir: string | undefined) {
+  if (enableJobQueue === false || !dataDir) {
+    return createInMemoryJobQueue();
+  }
+  return createFileBackedJobQueue(join(dataDir, "job-queue.json"));
 }

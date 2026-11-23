@@ -95,12 +95,7 @@ export async function validatePatchArtifact(
   validationPhases.push({
     phase: "drift",
     passed: !driftDetected,
-    message:
-      matchingPackages.length === 0
-        ? `Package ${manifest.packageName} is not currently installed.`
-        : inventoryMatch
-          ? `Installed version matches manifest target ${manifest.vulnerableVersion}.`
-          : `Installed version ${installedVersion} does not match manifest target ${manifest.vulnerableVersion}.`,
+    message: driftMessage(manifest, matchingPackages.length, inventoryMatch, installedVersion),
     error: driftDetected
       ? "Patch manifest does not match the installed dependency version."
       : undefined,
@@ -121,4 +116,19 @@ export async function validatePatchArtifact(
     inventoryMatch,
     validationPhases,
   };
+}
+
+function driftMessage(
+  target: { packageName: string; vulnerableVersion: string },
+  matchingCount: number,
+  inventoryMatch: boolean,
+  installedVersion: string | undefined,
+): string {
+  if (matchingCount === 0) {
+    return `Package ${target.packageName} is not currently installed.`;
+  }
+  if (inventoryMatch) {
+    return `Installed version matches manifest target ${target.vulnerableVersion}.`;
+  }
+  return `Installed version ${installedVersion} does not match manifest target ${target.vulnerableVersion}.`;
 }

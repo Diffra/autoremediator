@@ -111,15 +111,12 @@ function observeRun(
         candidate.fromVersion === result.fromVersion,
     );
     const outcome = item ? done.get(item.itemId) : undefined;
+    const toVersion = item?.toVersion || result.toVersion;
     return {
       cveId: report.cveId,
       name: result.packageName,
       fromVersion: result.fromVersion,
-      ...(item?.toVersion
-        ? { toVersion: item.toVersion }
-        : result.toVersion
-          ? { toVersion: result.toVersion }
-          : {}),
+      ...(toVersion ? { toVersion } : {}),
       runId: run.runId,
       planned: item !== undefined,
       applied: Boolean(outcome?.applied) && run.status !== "rolled-back",

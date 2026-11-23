@@ -21,8 +21,12 @@ afterEach(() => {
   rmSync(dir, { recursive: true, force: true });
 });
 
-const urlOf = (input: string | URL | Request): string =>
-  typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+function urlOf(input: string | URL | Request): string {
+  if (typeof input === "string") {
+    return input;
+  }
+  return input instanceof URL ? input.href : input.url;
+}
 
 const write = (path: string, content: string) => {
   mkdirSync(join(dir, path, ".."), { recursive: true });

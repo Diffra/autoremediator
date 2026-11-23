@@ -315,12 +315,7 @@ export async function updateOutdated(
     }
   }
 
-  const status: UpdateOutdatedReport["status"] =
-    failedCount > 0 && successCount > 0
-      ? "partial"
-      : failedCount > 0 && successCount === 0
-        ? "failed"
-        : "ok";
+  const status = reportStatus(failedCount, successCount);
 
   evidence.summary = {
     status,
@@ -377,4 +372,11 @@ export async function updateOutdated(
     provenance,
     changeRequests,
   };
+}
+
+function reportStatus(failedCount: number, successCount: number): UpdateOutdatedReport["status"] {
+  if (failedCount === 0) {
+    return "ok";
+  }
+  return successCount > 0 ? "partial" : "failed";
 }

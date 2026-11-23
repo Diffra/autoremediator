@@ -123,20 +123,21 @@ export function readNpmLockfile(root: string, text: string): LockfileResult {
   for (const [key, entry] of Object.entries(entries)) {
     const project = isProjectPackage(key);
     if (!project && !idAt.has(key)) continue;
-    const from = project
-      ? key === ""
-        ? "(project)"
-        : typeof entry.name === "string"
-          ? entry.name
-          : key
-      : idAt.get(key)!;
+    let from: string;
+    if (!project) {
+      from = idAt.get(key)!;
+    } else if (key === "") {
+      from = "(project)";
+    } else {
+      from = typeof entry.name === "string" ? entry.name : key;
+    }
     const ranges: Record<string, unknown> = {
       ...(entry.dependencies as object | undefined),
       ...(entry.optionalDependencies as object | undefined),
       ...(project ? (entry.devDependencies as object | undefined) : undefined),
     };
     for (const [name, range] of Object.entries(ranges)) {
-      const target = resolveFrom(project ? (key === "" ? "" : key) : key, name);
+      const target = resolveFrom(key, name);
       const to = target ? idAt.get(target) : undefined;
       if (!to) continue;
       graph.edges.push({

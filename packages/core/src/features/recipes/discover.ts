@@ -13,6 +13,7 @@ import { existsSync, lstatSync, readdirSync, readFileSync, realpathSync } from "
 import { join, relative, sep } from "node:path";
 
 import { errorMessage } from "../../shared/errors.js";
+import { compareStrings } from "../../shared/text.js";
 import { appliesTo } from "./engine.js";
 import {
   MAX_RECIPE_BYTES,
@@ -71,9 +72,7 @@ function jsonFiles(root: string): string[] {
     } catch {
       return;
     }
-    for (const entry of entries.toSorted((a, b) =>
-      a.name < b.name ? -1 : a.name > b.name ? 1 : 0,
-    )) {
+    for (const entry of entries.toSorted((a, b) => compareStrings(a.name, b.name))) {
       const full = join(dir, entry.name);
       if (entry.isSymbolicLink()) continue;
       if (entry.isDirectory()) walk(full, depth + 1);

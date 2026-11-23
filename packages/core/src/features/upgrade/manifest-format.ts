@@ -7,6 +7,11 @@ export function serializeManifest(original: string, value: unknown): string {
   const indent = /^([ \t]+)"/m.exec(original)?.[1] ?? "  ";
   let text = JSON.stringify(value, null, indent);
   if (original.includes("\r\n")) text = text.replaceAll("\n", "\r\n");
-  const ending = original.endsWith("\r\n") ? "\r\n" : original.endsWith("\n") ? "\n" : "";
+  let ending = "";
+  if (original.endsWith("\r\n")) {
+    ending = "\r\n";
+  } else if (original.endsWith("\n")) {
+    ending = "\n";
+  }
   return text + ending;
 }

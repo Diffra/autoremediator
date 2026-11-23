@@ -4,9 +4,8 @@ import { join } from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { sha256 } from "../../shared/hash.js";
+import { canonicalJson, sha256 } from "../../shared/hash.js";
 import { fingerprintRepo, sameInputs } from "./fingerprint.js";
-import { canonicalJson } from "./hash.js";
 import { isPlanId, isRunId, newRunId } from "./ids.js";
 import { Ledger } from "./ledger.js";
 import { RunStore } from "./run-store.js";

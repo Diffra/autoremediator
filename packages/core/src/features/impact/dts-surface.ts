@@ -6,7 +6,14 @@
  * types). Signatures are kept as source text so a comparison can say what changed, not just that
  * something did.
  */
-import { isNode, nameOfNode, parseSource, propertyName, type AstNode } from "./ast.js";
+import {
+  isNode,
+  memberKindOfMethod,
+  nameOfNode,
+  parseSource,
+  propertyName,
+  type AstNode,
+} from "./ast.js";
 import type { PackageIndex } from "./package-index.js";
 import type { ParamInfo } from "./types.js";
 
@@ -197,14 +204,7 @@ function readMembers(code: string, symbol: ApiSymbol, body: unknown[]): void {
         if (name === undefined || !value) break;
         const isStatic = raw.static === true;
         const methodKind = raw.kind as string;
-        const kind: MemberKind =
-          methodKind === "constructor"
-            ? "constructor"
-            : methodKind === "get"
-              ? "getter"
-              : methodKind === "set"
-                ? "setter"
-                : "method";
+        const kind = memberKindOfMethod(methodKind);
         addMember(symbol, {
           key:
             kind === "constructor"
@@ -696,14 +696,7 @@ export function extractJsSurface(index: PackageIndex, entryFile: string): ApiSur
   for (const [rawName, binding] of index.exportsOf(entryFile)) {
     // A CommonJS `module.exports = fn` is what an ESM or interop consumer sees as the default.
     const name = rawName === "module.exports" ? "default" : rawName;
-    const kind: SymbolKind =
-      binding.kind === "function"
-        ? "function"
-        : binding.kind === "class"
-          ? "class"
-          : binding.kind === "module"
-            ? "module"
-            : "value";
+    const kind = symbolKindOfBinding(binding.kind);
     const symbol = blankSymbol(name, kind);
     if (binding.params) {
       const text = `(${binding.params.map((param) => `${param.rest ? "..." : ""}${param.name}${param.optional && !param.rest ? "?" : ""}`).join(", ")})`;
@@ -735,4 +728,11 @@ export function extractJsSurface(index: PackageIndex, entryFile: string): ApiSur
     symbols,
     notes: ["Declared from JavaScript only: parameter and return types are not visible."],
   };
+}
+
+function symbolKindOfBinding(bindingKind: string): SymbolKind {
+  if (bindingKind === "function" || bindingKind === "class" || bindingKind === "module") {
+    return bindingKind;
+  }
+  return "value";
 }

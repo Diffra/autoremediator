@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 
 import { errorMessage } from "../../../shared/errors.js";
+import { fileAction } from "../../../shared/file-action.js";
 import { PACKAGE_VERSION } from "../../../shared/version.js";
 import { loadProjectLocks, occurrencesIn, type ProjectLocks } from "../../incident/project.js";
 import { renderDiff } from "../../init/diff.js";
@@ -319,8 +320,7 @@ function toChange(
       after: before ?? "",
     };
   }
-  const action =
-    before === undefined ? "create" : before === merged.content ? "unchanged" : "update";
+  const action = fileAction(before, merged.content);
   return {
     path,
     action,

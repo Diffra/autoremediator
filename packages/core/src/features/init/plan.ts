@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
+import { fileAction } from "../../shared/file-action.js";
 import {
   AGENTS_MD_SECTION,
   COPILOT_AGENT_PATH,
@@ -58,8 +59,7 @@ function toChange(
       after: before ?? "",
     };
   }
-  const action =
-    before === undefined ? "create" : before === merged.content ? "unchanged" : "update";
+  const action = fileAction(before, merged.content);
   return {
     path,
     action,
@@ -100,7 +100,7 @@ function owned(
       after: before,
     };
   }
-  const action = before === undefined ? "create" : before === content ? "unchanged" : "update";
+  const action = fileAction(before, content);
   return { path, action, reason, ...(before === undefined ? {} : { before }), after: content };
 }
 
@@ -241,7 +241,7 @@ function pnpmfileChange(cwd: string): FileChange {
   }
   return {
     path: PNPMFILE_PATH,
-    action: before === undefined ? "create" : before === content ? "unchanged" : "update",
+    action: fileAction(before, content),
     reason,
     ...(before === undefined ? {} : { before }),
     after: content,

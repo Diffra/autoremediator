@@ -107,12 +107,7 @@ export function detectManager(context: GitContext, requested?: HookManager): Man
   const husky = huskyFromPath !== undefined || existsSync(join(root, ".husky"));
 
   if (requested) {
-    const configFile =
-      requested === "lefthook"
-        ? (lefthook ?? "lefthook.yml")
-        : requested === "pre-commit"
-          ? PRE_COMMIT_FILE
-          : undefined;
+    const configFile = configFileFor(requested, lefthook);
     return {
       manager: requested,
       reason: "chosen with --manager",
@@ -137,4 +132,11 @@ export function detectManager(context: GitContext, requested?: HookManager): Man
       ? `core.hooksPath is ${hooksPath}`
       : "no hook manager found, using the repository's own hooks folder",
   };
+}
+
+function configFileFor(requested: HookManager, lefthook: string | undefined): string | undefined {
+  if (requested === "lefthook") {
+    return lefthook ?? "lefthook.yml";
+  }
+  return requested === "pre-commit" ? PRE_COMMIT_FILE : undefined;
 }

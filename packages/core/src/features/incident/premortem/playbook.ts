@@ -5,8 +5,12 @@ import type { PackageBlastRadius, PlaybookKind, PremortemRepo, PremortemReport }
 /** Quote a value for a POSIX shell. */
 export const shellQuote = (value: string): string => `'${value.replaceAll("'", `'\\''`)}'`;
 
-const scripts = (value: boolean | "unknown"): string =>
-  value === "unknown" ? "unknown" : value ? "**yes**" : "no";
+function scripts(value: boolean | "unknown"): string {
+  if (value === "unknown") {
+    return "unknown";
+  }
+  return value ? "**yes**" : "no";
+}
 
 const INTRO =
   "A rehearsal document, written before anything went wrong. It lists what depends on the packages that matter most and the exact commands to run on the day one of them is reported compromised. It is generated from lockfiles, CI files and installed manifests; regenerate it with `autoremediator premortem` when dependencies change.";

@@ -13,11 +13,12 @@ export function summarizeScanReport(report: ScanReport, mode: "plan" | "fix"): s
       const change = result.toVersion
         ? `${result.fromVersion} -> ${result.toVersion}`
         : result.fromVersion;
-      const outcome = result.applied
-        ? "fixed"
-        : result.dryRun
-          ? "would fix"
-          : `not fixed: ${result.unresolvedReason ?? "unknown"}`;
+      let outcome = `not fixed: ${result.unresolvedReason ?? "unknown"}`;
+      if (result.applied) {
+        outcome = "fixed";
+      } else if (result.dryRun) {
+        outcome = "would fix";
+      }
       lines.push(
         `- ${cveReport.cveId}: \`${result.packageName}\` ${change} (${result.strategy}), ${outcome}`,
       );

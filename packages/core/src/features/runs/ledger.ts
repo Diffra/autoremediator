@@ -1,8 +1,7 @@
 import { appendFileSync, existsSync, readFileSync } from "node:fs";
 
-import { sha256 } from "../../shared/hash.js";
+import { canonicalJson, sha256 } from "../../shared/hash.js";
 import { parseJson } from "../../shared/json.js";
-import { canonicalJson } from "./hash.js";
 import { stepEventSchema } from "./schemas.js";
 
 export interface StepEvent {

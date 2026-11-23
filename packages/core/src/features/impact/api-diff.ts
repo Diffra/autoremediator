@@ -50,11 +50,10 @@ function arityOf(signature: Signature): { min: number; max: number } {
 }
 
 function describeArity(arity: { min: number; max: number }): string {
-  return arity.max === Number.POSITIVE_INFINITY
-    ? `${arity.min}+`
-    : arity.min === arity.max
-      ? `${arity.min}`
-      : `${arity.min}-${arity.max}`;
+  if (arity.max === Number.POSITIVE_INFINITY) {
+    return `${arity.min}+`;
+  }
+  return arity.min === arity.max ? `${arity.min}` : `${arity.min}-${arity.max}`;
 }
 
 interface SignatureFinding {
@@ -225,15 +224,7 @@ function memberChanges(
   typed: boolean,
 ): ApiChange[] {
   const changes: ApiChange[] = [];
-  const memberOf =
-    before.kind === "variable"
-      ? "object"
-      : before.kind === "class" ||
-          before.kind === "interface" ||
-          before.kind === "namespace" ||
-          before.kind === "enum"
-        ? before.kind
-        : undefined;
+  const memberOf = memberContainerOf(before.kind);
   const removed = [...before.members.values()].filter((member) => !after.members.has(member.key));
   const added = [...after.members.values()].filter((member) => !before.members.has(member.key));
   const claimed = new Set<string>();
@@ -467,4 +458,15 @@ export function compareSurfaces(
     if (next) changes.push(...compareSymbol(specifier, symbol.name, symbol, next, typed));
   }
   return changes;
+}
+
+/** What a changed member belongs to, in the words a report uses; undefined for kinds with no members. */
+function memberContainerOf(kind: ApiSymbol["kind"]): ApiChange["memberOf"] {
+  if (kind === "variable") {
+    return "object";
+  }
+  if (kind === "class" || kind === "interface" || kind === "namespace" || kind === "enum") {
+    return kind;
+  }
+  return undefined;
 }
