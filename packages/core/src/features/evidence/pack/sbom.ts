@@ -161,113 +161,21 @@ export function buildSbom(input: {
     ...(product.purl ? { purl: product.purl } : {}),
   };
 
-  const components = new Map<string, CycloneDxComponent>();
-  const dependsOn = new Map<string, Set<string>>();
-  const locked = new Set<string>();
+  const state: SbomState = {
+    components: new Map(),
+    dependsOn: new Map(),
+    locked: new Set(),
+    notes,
+  };
   let source: string;
-
-  const facts = new Map<string, LockedPackageFacts>();
   if (chosen) {
     source = chosen.path;
-    try {
-      for (const [key, value] of readLockFacts(
-        chosen.path,
-        readFileSync(join(cwd, chosen.path), "utf8"),
-      )) {
-        facts.set(key, value);
-      }
-    } catch {
-      notes.push(`${chosen.path} could not be read again for hashes; components have none.`);
-    }
-    const reach = reachability(chosen.graph);
-    for (const node of chosen.graph.nodes.values()) {
-      const purl = npmPurl(node.name, node.version);
-      const found = facts.get(factKey(node.name, node.version));
-      const hash = found?.integrity ? hashFromIntegrity(found.integrity) : undefined;
-      const licenseText = found?.license ?? installedLicense(cwd, node.name, node.version);
-      const license = licenseText ? licenseChoice(licenseText) : undefined;
-      const kind = reach.get(node.id);
-      const existing = components.get(purl);
-      if (!existing) {
-        const report = reportEntries.get(factKey(node.name, node.version));
-        const properties = [
-          ...(report?.scope
-            ? [{ name: "autoremediator:dependency-scope", value: report.scope }]
-            : []),
-          ...(report?.status
-            ? [{ name: "autoremediator:remediation-status", value: report.status }]
-            : []),
-          ...(report?.cveIds?.length
-            ? [{ name: "autoremediator:cve-ids", value: report.cveIds.toSorted().join(",") }]
-            : []),
-        ];
-        components.set(purl, {
-          type: "library",
-          "bom-ref": purl,
-          ...splitName(node.name),
-          version: node.version,
-          ...(kind
-            ? { scope: kind === "prod" ? ("required" as const) : ("excluded" as const) }
-            : {}),
-          purl,
-          ...(hash ? { hashes: [hash] } : {}),
-          ...(license ? { licenses: [license] } : {}),
-          ...(properties.length > 0 ? { properties } : {}),
-        });
-        dependsOn.set(purl, new Set());
-      } else if (kind === "prod" && existing.scope === "excluded") {
-        existing.scope = "required";
-      }
-      locked.add(factKey(node.name, node.version));
-    }
-    for (const node of chosen.graph.nodes.values()) {
-      const from = npmPurl(node.name, node.version);
-      for (const depId of node.deps) {
-        const dep = chosen.graph.nodes.get(depId);
-        if (!dep) continue;
-        const to = npmPurl(dep.name, dep.version);
-        if (to !== from) dependsOn.get(from)?.add(to);
-      }
-    }
-    const rootDeps = new Set<string>();
-    for (const root of chosen.graph.roots) {
-      for (const id of [...root.prod, ...root.dev]) {
-        const node = chosen.graph.nodes.get(id);
-        if (node) rootDeps.add(npmPurl(node.name, node.version));
-      }
-    }
-    dependsOn.set(productRef, rootDeps);
-    if (chosen.graph.roots.length === 0) {
-      notes.push(
-        "The lockfile did not say which packages the project depends on directly, so the product has no direct dependencies in the graph.",
-      );
-    }
+    addLockedComponents(state, chosen, { cwd, productRef, reportEntries });
   } else {
     source = "report";
-    for (const entry of reportEntries.values()) {
-      const purl = npmPurl(entry.name, entry.version);
-      components.set(purl, {
-        type: "library",
-        "bom-ref": purl,
-        ...splitName(entry.name),
-        version: entry.version,
-        purl,
-        properties: [
-          { name: "autoremediator:dependency-scope", value: entry.scope },
-          ...(entry.status
-            ? [{ name: "autoremediator:remediation-status", value: entry.status }]
-            : []),
-        ],
-      });
-      locked.add(factKey(entry.name, entry.version));
-    }
-    notes.push(
-      components.size > 0
-        ? "No lockfile could be read; the components come from the SBOM recorded in run reports, with no dependency graph, hashes or licenses."
-        : "No lockfile could be read and no run report carries an SBOM, so the SBOM has no components.",
-    );
-    dependsOn.set(productRef, new Set());
+    addReportComponents(state, productRef, reportEntries);
   }
+  const { components, dependsOn, locked } = state;
 
   const sorted = [...components.values()].toSorted((a, b) =>
     a["bom-ref"].localeCompare(b["bom-ref"]),
@@ -306,4 +214,127 @@ export function buildSbom(input: {
     locked,
     notes,
   };
+}
+
+interface SbomState {
+  components: Map<string, CycloneDxComponent>;
+  dependsOn: Map<string, Set<string>>;
+  locked: Set<string>;
+  notes: string[];
+}
+
+type ChosenLock = ProjectLocks["locks"][number];
+
+/** Components, hashes, licenses and the dependency graph of the lockfile the SBOM follows. */
+function addLockedComponents(
+  state: SbomState,
+  chosen: ChosenLock,
+  context: { cwd: string; productRef: string; reportEntries: Map<string, SbomEntry> },
+): void {
+  const { components, dependsOn, locked, notes } = state;
+  const { cwd, productRef, reportEntries } = context;
+  const facts = new Map<string, LockedPackageFacts>();
+  try {
+    for (const [key, value] of readLockFacts(
+      chosen.path,
+      readFileSync(join(cwd, chosen.path), "utf8"),
+    )) {
+      facts.set(key, value);
+    }
+  } catch {
+    notes.push(`${chosen.path} could not be read again for hashes; components have none.`);
+  }
+  const reach = reachability(chosen.graph);
+  for (const node of chosen.graph.nodes.values()) {
+    const purl = npmPurl(node.name, node.version);
+    const found = facts.get(factKey(node.name, node.version));
+    const hash = found?.integrity ? hashFromIntegrity(found.integrity) : undefined;
+    const licenseText = found?.license ?? installedLicense(cwd, node.name, node.version);
+    const license = licenseText ? licenseChoice(licenseText) : undefined;
+    const kind = reach.get(node.id);
+    const existing = components.get(purl);
+    if (!existing) {
+      const report = reportEntries.get(factKey(node.name, node.version));
+      const properties = [
+        ...(report?.scope
+          ? [{ name: "autoremediator:dependency-scope", value: report.scope }]
+          : []),
+        ...(report?.status
+          ? [{ name: "autoremediator:remediation-status", value: report.status }]
+          : []),
+        ...(report?.cveIds?.length
+          ? [{ name: "autoremediator:cve-ids", value: report.cveIds.toSorted().join(",") }]
+          : []),
+      ];
+      components.set(purl, {
+        type: "library",
+        "bom-ref": purl,
+        ...splitName(node.name),
+        version: node.version,
+        ...(kind ? { scope: kind === "prod" ? ("required" as const) : ("excluded" as const) } : {}),
+        purl,
+        ...(hash ? { hashes: [hash] } : {}),
+        ...(license ? { licenses: [license] } : {}),
+        ...(properties.length > 0 ? { properties } : {}),
+      });
+      dependsOn.set(purl, new Set());
+    } else if (kind === "prod" && existing.scope === "excluded") {
+      existing.scope = "required";
+    }
+    locked.add(factKey(node.name, node.version));
+  }
+  for (const node of chosen.graph.nodes.values()) {
+    const from = npmPurl(node.name, node.version);
+    for (const depId of node.deps) {
+      const dep = chosen.graph.nodes.get(depId);
+      if (!dep) continue;
+      const to = npmPurl(dep.name, dep.version);
+      if (to !== from) dependsOn.get(from)?.add(to);
+    }
+  }
+  const rootDeps = new Set<string>();
+  for (const root of chosen.graph.roots) {
+    for (const id of [...root.prod, ...root.dev]) {
+      const node = chosen.graph.nodes.get(id);
+      if (node) rootDeps.add(npmPurl(node.name, node.version));
+    }
+  }
+  dependsOn.set(productRef, rootDeps);
+  if (chosen.graph.roots.length === 0) {
+    notes.push(
+      "The lockfile did not say which packages the project depends on directly, so the product has no direct dependencies in the graph.",
+    );
+  }
+}
+
+/** Without a readable lockfile: the packages a recorded run report lists, with no graph. */
+function addReportComponents(
+  state: SbomState,
+  productRef: string,
+  reportEntries: Map<string, SbomEntry>,
+): void {
+  const { components, dependsOn, locked, notes } = state;
+  for (const entry of reportEntries.values()) {
+    const purl = npmPurl(entry.name, entry.version);
+    components.set(purl, {
+      type: "library",
+      "bom-ref": purl,
+      ...splitName(entry.name),
+      version: entry.version,
+      purl,
+      properties: [
+        { name: "autoremediator:dependency-scope", value: entry.scope },
+        ...(entry.status
+          ? [{ name: "autoremediator:remediation-status", value: entry.status }]
+          : []),
+      ],
+    });
+    locked.add(factKey(entry.name, entry.version));
+  }
+  notes.push(
+    components.size > 0
+      ? "No lockfile could be read; the components come from the SBOM recorded in run reports, with no dependency graph, hashes or licenses."
+      : "No lockfile could be read and no run report carries an SBOM, so the SBOM has no components.",
+  );
+  dependsOn.set(productRef, new Set());
 }

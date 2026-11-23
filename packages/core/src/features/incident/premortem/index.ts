@@ -172,6 +172,59 @@ const slug = (value: string): string => {
  */
 export async function premortem(options: PremortemOptions): Promise<PremortemReport> {
   const notes: string[] = [];
+  const labelled = resolveTargets(options);
+
+  const scans = labelled.map((target) => scanRepo(target));
+  const rankBy = options.rankBy ?? "depended-upon";
+  const stats = aggregate(scans, rankBy);
+
+  const { names, selection } = selectPackages(options, stats, rankBy);
+
+  const packages = names.map((packageName) => blastRadiusOf(packageName, scans));
+  if (selection.mode === "given") {
+    for (const entry of packages.filter((candidate) => candidate.repoCount === 0)) {
+      notes.push(
+        `${entry.packageName} is not locked in any of the ${scans.length} repositories read.`,
+      );
+    }
+  }
+  for (const scan of scans) {
+    for (const note of scan.repo.notes) notes.push(`${scan.repo.label}: ${note}`);
+  }
+
+  const report: PremortemReport = {
+    schemaVersion: "1.0",
+    generatedAt: new Date().toISOString(),
+    repos: scans.map((scan) => scan.repo),
+    packages,
+    selection,
+    notes,
+  };
+
+  if (options.outputDir) {
+    writePremortemFiles(report, options, resolve(options.outputDir));
+  }
+  return report;
+}
+
+function strongestScope(
+  scopes: ReadonlySet<string>,
+): "production" | "development" | "unreferenced" {
+  if (scopes.has("production")) {
+    return "production";
+  }
+  return scopes.has("development") ? "development" : "unreferenced";
+}
+
+function combinedInstallScript(scripts: ReadonlySet<boolean | "unknown">): boolean | "unknown" {
+  if (scripts.has(true)) {
+    return true;
+  }
+  return scripts.has("unknown") ? "unknown" : false;
+}
+
+/** The named repositories plus any found under `root`, checked, de-duplicated and given unique labels. */
+function resolveTargets(options: PremortemOptions): PremortemTarget[] {
   let targets = options.targets ?? [];
   if (options.root) targets = [...targets, ...discoverRepos(resolve(options.root))];
   if (targets.length === 0) {
@@ -200,11 +253,15 @@ export async function premortem(options: PremortemOptions): Promise<PremortemRep
     labels.add(label);
     labelled.push({ cwd: target.cwd, label });
   }
+  return labelled;
+}
 
-  const scans = labelled.map((target) => scanRepo(target));
-  const rankBy = options.rankBy ?? "depended-upon";
-  const stats = aggregate(scans, rankBy);
-
+/** The packages to assess: those the caller named, or the top few ranked by reach or privilege. */
+function selectPackages(
+  options: PremortemOptions,
+  stats: ReturnType<typeof aggregate>,
+  rankBy: NonNullable<PremortemOptions["rankBy"]>,
+): { names: string[]; selection: PremortemReport["selection"] } {
   let names: string[];
   let selection: PremortemReport["selection"];
   if (options.packages && options.packages.length > 0) {
@@ -225,114 +282,86 @@ export async function premortem(options: PremortemOptions): Promise<PremortemRep
       .map(([name]) => name);
     selection = { mode: "ranked", rankBy, top };
   }
+  return { names, selection };
+}
 
-  const packages: PackageBlastRadius[] = names.map((packageName) => {
-    const usage: PremortemUsage[] = [];
-    const dependents = new Set<string>();
-    let privileged: boolean | "unknown" = false;
-    for (const scan of scans) {
-      const found = scan.locks.flatMap(({ graph }) => {
-        const hits = findOccurrences(graph, (name) => name === packageName);
-        const parents = reverseEdges(graph);
-        for (const occurrence of hits) {
-          for (const parent of parents.get(occurrence.nodeId) ?? []) {
-            dependents.add(graph.nodes.get(parent)?.name ?? parent);
-          }
-        }
-        return hits;
-      });
-      if (found.length === 0) continue;
-      const scripts = new Set(
-        found.map((entry) =>
-          installScriptOf(scan.repo.cwd, entry.name, entry.version, entry.installScript),
-        ),
-      );
-      if (scripts.has(true)) privileged = true;
-      else if (scripts.has("unknown") && privileged === false) privileged = "unknown";
-      const scopes = new Set(found.map((entry) => entry.scope));
-      usage.push({
-        repo: scan.repo.label,
-        versions: [...new Set(found.map((entry) => entry.version))].toSorted(),
-        direct: found.some((entry) => entry.direct),
-        scope: strongestScope(scopes),
-        installScript: combinedInstallScript(scripts),
-      });
-    }
-    return {
-      packageName,
-      repoCount: usage.length,
-      dependentCount: dependents.size,
-      installScript: privileged,
-      usage,
-      reposWithCiSecrets: usage
-        .map((entry) => entry.repo)
-        .filter((label) => {
-          const repo = scans.find((scan) => scan.repo.label === label)?.repo;
-          return Boolean(repo?.ci.installs && repo.ci.secretNames.length > 0);
-        }),
-    };
-  });
-  if (selection.mode === "given") {
-    for (const entry of packages.filter((candidate) => candidate.repoCount === 0)) {
-      notes.push(
-        `${entry.packageName} is not locked in any of the ${scans.length} repositories read.`,
-      );
-    }
-  }
+/** Where one package is locked across the scanned repositories, and what an install of it can reach. */
+function blastRadiusOf(
+  packageName: string,
+  scans: ReturnType<typeof scanRepo>[],
+): PackageBlastRadius {
+  const usage: PremortemUsage[] = [];
+  const dependents = new Set<string>();
+  let privileged: boolean | "unknown" = false;
   for (const scan of scans) {
-    for (const note of scan.repo.notes) notes.push(`${scan.repo.label}: ${note}`);
-  }
-
-  const report: PremortemReport = {
-    schemaVersion: "1.0",
-    generatedAt: new Date().toISOString(),
-    repos: scans.map((scan) => scan.repo),
-    packages,
-    selection,
-    notes,
-  };
-
-  if (options.outputDir) {
-    const dir = resolve(options.outputDir);
-    const playbookDir = join(dir, "playbooks");
-    mkdirSync(playbookDir, { recursive: true });
-    const files: string[] = [];
-    const write = (path: string, text: string): void => {
-      writeFileSync(path, text, "utf8");
-      files.push(path);
-    };
-    const kind = options.playbooks ?? "repo";
-    const subjects =
-      kind === "repo"
-        ? report.repos.map((repo) => repo.label)
-        : report.packages.map((entry) => entry.packageName);
-    for (const subject of subjects) {
-      write(join(playbookDir, `${slug(subject)}.md`), renderPlaybook(report, kind, subject));
-    }
-    write(
-      join(dir, "premortem.md"),
-      renderPremortemSummary(report, kind, (subject) => `playbooks/${slug(subject)}.md`),
+    const found = scan.locks.flatMap(({ graph }) => {
+      const hits = findOccurrences(graph, (name) => name === packageName);
+      const parents = reverseEdges(graph);
+      for (const occurrence of hits) {
+        for (const parent of parents.get(occurrence.nodeId) ?? []) {
+          dependents.add(graph.nodes.get(parent)?.name ?? parent);
+        }
+      }
+      return hits;
+    });
+    if (found.length === 0) continue;
+    const scripts = new Set(
+      found.map((entry) =>
+        installScriptOf(scan.repo.cwd, entry.name, entry.version, entry.installScript),
+      ),
     );
-    write(join(dir, "premortem.json"), `${JSON.stringify(report, null, 2)}\n`);
-    report.files = files;
-    // The JSON on disk is written before `files` is known; rewrite it so it lists itself.
-    writeFileSync(join(dir, "premortem.json"), `${JSON.stringify(report, null, 2)}\n`, "utf8");
+    if (scripts.has(true)) privileged = true;
+    else if (scripts.has("unknown") && privileged === false) privileged = "unknown";
+    const scopes = new Set(found.map((entry) => entry.scope));
+    usage.push({
+      repo: scan.repo.label,
+      versions: [...new Set(found.map((entry) => entry.version))].toSorted(),
+      direct: found.some((entry) => entry.direct),
+      scope: strongestScope(scopes),
+      installScript: combinedInstallScript(scripts),
+    });
   }
-  return report;
+  return {
+    packageName,
+    repoCount: usage.length,
+    dependentCount: dependents.size,
+    installScript: privileged,
+    usage,
+    reposWithCiSecrets: usage
+      .map((entry) => entry.repo)
+      .filter((label) => {
+        const repo = scans.find((scan) => scan.repo.label === label)?.repo;
+        return Boolean(repo?.ci.installs && repo.ci.secretNames.length > 0);
+      }),
+  };
 }
 
-function strongestScope(
-  scopes: ReadonlySet<string>,
-): "production" | "development" | "unreferenced" {
-  if (scopes.has("production")) {
-    return "production";
+function writePremortemFiles(
+  report: PremortemReport,
+  options: PremortemOptions,
+  dir: string,
+): void {
+  const playbookDir = join(dir, "playbooks");
+  mkdirSync(playbookDir, { recursive: true });
+  const files: string[] = [];
+  const write = (path: string, text: string): void => {
+    writeFileSync(path, text, "utf8");
+    files.push(path);
+  };
+  const kind = options.playbooks ?? "repo";
+  const subjects =
+    kind === "repo"
+      ? report.repos.map((repo) => repo.label)
+      : report.packages.map((entry) => entry.packageName);
+  for (const subject of subjects) {
+    write(join(playbookDir, `${slug(subject)}.md`), renderPlaybook(report, kind, subject));
   }
-  return scopes.has("development") ? "development" : "unreferenced";
-}
-
-function combinedInstallScript(scripts: ReadonlySet<boolean | "unknown">): boolean | "unknown" {
-  if (scripts.has(true)) {
-    return true;
-  }
-  return scripts.has("unknown") ? "unknown" : false;
+  write(
+    join(dir, "premortem.md"),
+    renderPremortemSummary(report, kind, (subject) => `playbooks/${slug(subject)}.md`),
+  );
+  write(join(dir, "premortem.json"), `${JSON.stringify(report, null, 2)}\n`);
+  report.files = files;
+  // The JSON on disk is written before `files` is known; rewrite it so it lists itself.
+  writeFileSync(join(dir, "premortem.json"), `${JSON.stringify(report, null, 2)}\n`, "utf8");
 }

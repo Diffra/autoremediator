@@ -56,6 +56,13 @@ export function addRecipesCommand(program: Command): void {
       "Recipes: what earlier repairs learned about adopting a new version of a dependency, kept as data",
     );
 
+  addListSubcommand(recipes);
+  addShowSubcommand(recipes);
+  addCaptureSubcommand(recipes);
+  addExportSubcommand(recipes);
+}
+
+function addListSubcommand(recipes: Command): void {
   common(
     recipes
       .command("list")
@@ -85,7 +92,9 @@ export function addRecipesCommand(program: Command): void {
       for (const problem of listing.problems) out(`unusable: ${problem.file}: ${problem.error}`);
     }),
   );
+}
 
+function addShowSubcommand(recipes: Command): void {
   common(
     recipes
       .command("show")
@@ -128,7 +137,9 @@ export function addRecipesCommand(program: Command): void {
       }
     }),
   );
+}
 
+function addCaptureSubcommand(recipes: Command): void {
   common(
     recipes
       .command("capture")
@@ -163,7 +174,9 @@ export function addRecipesCommand(program: Command): void {
       );
     }),
   );
+}
 
+function addExportSubcommand(recipes: Command): void {
   common(
     recipes
       .command("export")
