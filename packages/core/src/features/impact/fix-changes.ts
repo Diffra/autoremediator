@@ -4,7 +4,7 @@
  */
 import type { AdvisoryHints, CandidateBasis } from "./fix-diff.js";
 import { tokenDelta } from "./fix-score.js";
-import type { LocalDef } from "./js-exports.js";
+import type { LocalDef } from "./js-locals.js";
 import { type PackageIndex, type ResolvedExport } from "./package-index.js";
 
 const MAX_VIA_DEPTH = 4;
