@@ -107,19 +107,6 @@ export function readNpmLockfile(root: string, text: string): LockfileResult {
     idAt.set(key, node.id);
   }
 
-  /** The install path that Node would resolve `name` to from `fromKey`: its own node_modules, then each parent's. */
-  const resolveFrom = (fromKey: string, name: string): string | undefined => {
-    let base = fromKey;
-    for (;;) {
-      const candidate = base === "" ? `node_modules/${name}` : `${base}/node_modules/${name}`;
-      if (idAt.has(candidate)) return candidate;
-      if (workspaceLinks.has(candidate)) return undefined;
-      if (base === "") return undefined;
-      const cut = base.lastIndexOf("/node_modules/");
-      base = cut === -1 ? "" : base.slice(0, cut);
-    }
-  };
-
   for (const [key, entry] of Object.entries(entries)) {
     const project = isProjectPackage(key);
     if (!project && !idAt.has(key)) continue;
@@ -137,7 +124,7 @@ export function readNpmLockfile(root: string, text: string): LockfileResult {
       ...(project ? (entry.devDependencies as object | undefined) : undefined),
     };
     for (const [name, range] of Object.entries(ranges)) {
-      const target = resolveFrom(key, name);
+      const target = resolveInstallPath(idAt, workspaceLinks, key, name);
       const to = target ? idAt.get(target) : undefined;
       if (!to) continue;
       graph.edges.push({
@@ -220,16 +207,8 @@ export function readPnpmLockfile(root: string, text: string): LockfileResult {
     };
   }
   if (!data) return { unsupported: "pnpm-lock.yaml holds no lockfile document" };
-  const lockfileVersion =
-    typeof data.lockfileVersion === "string" || typeof data.lockfileVersion === "number"
-      ? String(data.lockfileVersion)
-      : "";
-  const version = Number.parseFloat(lockfileVersion);
-  if (!(version >= 6)) {
-    return {
-      unsupported: `pnpm-lock.yaml lockfileVersion ${lockfileVersion || "(missing)"} is older than 6.0, which this analysis does not read`,
-    };
-  }
+  const unsupported = unsupportedPnpmVersion(data);
+  if (unsupported) return { unsupported };
 
   const graph: LockGraph = { format: "pnpm", nodes: new Map(), edges: [] };
   const packages = (data.packages ?? {}) as Record<string, Record<string, unknown>>;
@@ -267,76 +246,8 @@ export function readPnpmLockfile(root: string, text: string): LockfileResult {
     if (parsed) register(parsed.name, parsed.version);
   }
 
-  // Ranges between packages are not in the lockfile; the installed manifest of the dependent has them.
-  const declaredRanges = new Map<string, Record<string, string>>();
-  const rangesOf = (node: LockNode): Record<string, string> => {
-    let ranges = declaredRanges.get(node.id);
-    if (ranges) return ranges;
-    ranges = {};
-    for (const file of node.manifestFiles) {
-      const manifest = readManifest(file);
-      if (manifest) {
-        Object.assign(ranges, manifest.dependencies, manifest.optionalDependencies);
-        break;
-      }
-    }
-    declaredRanges.set(node.id, ranges);
-    return ranges;
-  };
-
-  for (const [key, entry] of Object.entries(source)) {
-    const parsed = parsePnpmKey(key);
-    if (!parsed) continue;
-    const from = nodeId(parsed.name, parsed.version);
-    const fromNode = graph.nodes.get(from);
-    if (!fromNode) continue;
-    for (const field of ["dependencies", "optionalDependencies"] as const) {
-      for (const [name, value] of Object.entries((entry[field] ?? {}) as Record<string, string>)) {
-        const target = parsePnpmValue(name, value);
-        if (!target) continue;
-        const to = register(target.name, target.version).id;
-        if (
-          graph.edges.some((edge) => edge.from === from && edge.to === to && edge.name === name)
-        ) {
-          continue;
-        }
-        graph.edges.push({
-          from,
-          fromDirect: false,
-          to,
-          name,
-          range: plainRange(rangesOf(fromNode)[name]),
-        });
-      }
-    }
-  }
-
-  // Direct dependencies of the project and of each workspace package.
-  const importers = (data.importers ?? { ".": data }) as Record<string, Record<string, unknown>>;
-  for (const [importer, entry] of Object.entries(importers)) {
-    const label =
-      importer === "."
-        ? "(project)"
-        : (readManifest(join(root, importer, "package.json"))?.name ?? importer);
-    for (const field of ["dependencies", "devDependencies", "optionalDependencies"] as const) {
-      for (const [name, value] of Object.entries((entry[field] ?? {}) as Record<string, unknown>)) {
-        // v6+ writes { specifier, version }; older writes a bare version.
-        const record =
-          typeof value === "object" && value !== null
-            ? (value as { specifier?: string; version?: string })
-            : { version: String(value) };
-        const target = record.version ? parsePnpmValue(name, record.version) : undefined;
-        if (!target) continue;
-        graph.edges.push({
-          from: label,
-          fromDirect: true,
-          to: register(target.name, target.version).id,
-          name,
-          range: plainRange(record.specifier),
-        });
-      }
-    }
-  }
+  addDependencyEdges(graph, source, register);
+  addImporterEdges(graph, data, root, register);
   return { graph };
 }
 
@@ -382,4 +293,120 @@ export function readLockfile(root: string): {
     };
   }
   return { result: { unsupported: "no lockfile found" } };
+}
+
+/** The install path that Node would resolve `name` to from `fromKey`: its own node_modules, then each parent's. */
+function resolveInstallPath(
+  idAt: ReadonlyMap<string, string>,
+  workspaceLinks: ReadonlySet<string>,
+  fromKey: string,
+  name: string,
+): string | undefined {
+  let base = fromKey;
+  for (;;) {
+    const candidate = base === "" ? `node_modules/${name}` : `${base}/node_modules/${name}`;
+    if (idAt.has(candidate)) return candidate;
+    if (workspaceLinks.has(candidate)) return undefined;
+    if (base === "") return undefined;
+    const cut = base.lastIndexOf("/node_modules/");
+    base = cut === -1 ? "" : base.slice(0, cut);
+  }
+}
+
+/** Why a pnpm lockfile cannot be read, or undefined when its version is supported. */
+function unsupportedPnpmVersion(data: Record<string, unknown>): string | undefined {
+  const lockfileVersion =
+    typeof data.lockfileVersion === "string" || typeof data.lockfileVersion === "number"
+      ? String(data.lockfileVersion)
+      : "";
+  const version = Number.parseFloat(lockfileVersion);
+  if (!(version >= 6)) {
+    return `pnpm-lock.yaml lockfileVersion ${lockfileVersion || "(missing)"} is older than 6.0, which this analysis does not read`;
+  }
+  return undefined;
+}
+
+/** Direct dependencies of the project and of each workspace package. */
+function addImporterEdges(
+  graph: LockGraph,
+  data: Record<string, unknown>,
+  root: string,
+  register: (name: string, versionText: string) => LockNode,
+): void {
+  const importers = (data.importers ?? { ".": data }) as Record<string, Record<string, unknown>>;
+  for (const [importer, entry] of Object.entries(importers)) {
+    const label =
+      importer === "."
+        ? "(project)"
+        : (readManifest(join(root, importer, "package.json"))?.name ?? importer);
+    for (const field of ["dependencies", "devDependencies", "optionalDependencies"] as const) {
+      for (const [name, value] of Object.entries((entry[field] ?? {}) as Record<string, unknown>)) {
+        // v6+ writes { specifier, version }; older writes a bare version.
+        const record =
+          typeof value === "object" && value !== null
+            ? (value as { specifier?: string; version?: string })
+            : { version: String(value) };
+        const target = record.version ? parsePnpmValue(name, record.version) : undefined;
+        if (!target) continue;
+        graph.edges.push({
+          from: label,
+          fromDirect: true,
+          to: register(target.name, target.version).id,
+          name,
+          range: plainRange(record.specifier),
+        });
+      }
+    }
+  }
+}
+
+/** Edges between installed packages. Their ranges come from the dependent's installed manifest. */
+function addDependencyEdges(
+  graph: LockGraph,
+  source: Record<string, Record<string, unknown>>,
+  register: (name: string, versionText: string) => LockNode,
+): void {
+  // Ranges between packages are not in the lockfile; the installed manifest of the dependent has them.
+  const declaredRanges = new Map<string, Record<string, string>>();
+  const rangesOf = (node: LockNode): Record<string, string> => {
+    let ranges = declaredRanges.get(node.id);
+    if (ranges) return ranges;
+    ranges = {};
+    for (const file of node.manifestFiles) {
+      const manifest = readManifest(file);
+      if (manifest) {
+        Object.assign(ranges, manifest.dependencies, manifest.optionalDependencies);
+        break;
+      }
+    }
+    declaredRanges.set(node.id, ranges);
+    return ranges;
+  };
+
+  for (const [key, entry] of Object.entries(source)) {
+    const parsed = parsePnpmKey(key);
+    if (!parsed) continue;
+    const from = nodeId(parsed.name, parsed.version);
+    const fromNode = graph.nodes.get(from);
+    if (!fromNode) continue;
+    for (const field of ["dependencies", "optionalDependencies"] as const) {
+      for (const [name, value] of Object.entries((entry[field] ?? {}) as Record<string, string>)) {
+        const target = parsePnpmValue(name, value);
+        if (!target) continue;
+        const to = register(target.name, target.version).id;
+        if (
+          graph.edges.some((edge) => edge.from === from && edge.to === to && edge.name === name)
+        ) {
+          continue;
+        }
+        graph.edges.push({
+          from,
+          fromDirect: false,
+          to,
+          name,
+          range: plainRange(rangesOf(fromNode)[name]),
+        });
+      }
+    }
+  }
 }

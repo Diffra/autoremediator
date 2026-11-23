@@ -7,8 +7,8 @@ import { errorMessage } from "../../shared/errors.js";
  * The feature is opt-in. Without an `autonomy` key in the policy file none of this does anything:
  * nothing is refused, nothing is recorded, and reports carry no autonomy field.
  */
-import { evaluate, effectiveLevel, nextPromotion, signalsFor, transitionsOf } from "./compute.js";
-import type { CapInfo, NextPromotion, OutcomeFacts, Transition, WindowStats } from "./compute.js";
+import { evaluate, effectiveLevel, nextPromotion, signalsFor } from "./compute.js";
+import type { CapInfo, NextPromotion, OutcomeFacts, WindowStats } from "./compute.js";
 import {
   appendTrackEvents,
   readTrackRecord,
@@ -16,6 +16,7 @@ import {
   TRACK_RECORD_PATH,
   TrackRecordError,
 } from "./record.js";
+import { transitionsOf, type Transition } from "./transitions.js";
 import {
   type AutonomyConfig,
   type AutonomyLevel,

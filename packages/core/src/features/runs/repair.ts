@@ -95,31 +95,9 @@ export async function promoteChange(params: {
 
   const files = await patchFiles(root, diff).catch(() => undefined);
   if (!files) return { ok: false, message: "the verified change is not a valid patch" };
-  // The same rules the attempt was held to, checked again where the change reaches the project: the
-  // diff comes from a checkout that ran the project's code, so it is not trusted for having passed.
-  try {
-    assertPlainTextPatch(diff);
-  } catch (error) {
-    return { ok: false, message: errorMessage(error) };
-  }
-  const refused = files.filter((file) => {
-    const kind = classifyPath(relative(resolve(cwd), resolve(root, file)));
-    return !["manifest", "lockfile", "patch", "install-state", "source"].includes(kind);
-  });
-  if (refused.length > 0) {
-    return {
-      ok: false,
-      message: `the change touches files that remediation may not change: ${refused.join(", ")}`,
-    };
-  }
+  const refusal = patchRefusal(cwd, root, diff, files);
+  if (refusal) return { ok: false, message: refusal };
   const absolute = files.map((file) => resolve(root, file));
-  const outside = absolute.filter((file) => relative(resolve(cwd), file).startsWith(".."));
-  if (outside.length > 0) {
-    return {
-      ok: false,
-      message: `the change touches files outside the project directory: ${outside.join(", ")}`,
-    };
-  }
 
   try {
     await git(root, ["apply", "--check", "-"], diff);
@@ -168,17 +146,7 @@ export async function promoteChange(params: {
     );
   }
 
-  const verification = await deps.verify({
-    cwd,
-    ...(params.packageManager ? { packageManager: params.packageManager } : {}),
-    policy: params.policy,
-    baseFiles: before.fileSnapshots,
-    statusBefore: before.isGit ? (before.gitStatusBefore ?? []) : undefined,
-    advisories: params.advisories,
-    expectedRemaining: params.expectedRemaining,
-    options: { allowSourceEdits: true },
-    checks: PROMOTION_CHECKS,
-  });
+  const verification = await deps.verify(promotionRequest(params, before));
   if (!verification.passed) {
     const failed = verification.checks.find((check) => check.name === verification.failedCheck);
     return undo(
@@ -278,36 +246,122 @@ export async function repairItem(
 
     // What an agent learned is kept with the attempt, ready for `recipes capture`. A recipe's own fix is not recaptured.
     if (promoted.ok && !attempt.agentId.startsWith("recipe:")) {
-      const captured = recipeFromAttempt({
-        diff: attempt.diff,
-        packageName: item.packageName,
-        fromVersion: item.fromVersion,
-        toVersion: item.toVersion,
-        runId,
-        attemptId,
-        agentId: attempt.agentId,
-        failure: attempt.initialFailure,
-        verification: attempt.verification,
-        summary: attempt.reason,
-      });
-      if ("recipe" in captured) {
-        recipeJson = serializeRecipe(captured.recipe);
-        ledger.append("recipe.captured", {
-          attemptId,
-          itemId: item.itemId,
-          recipeId: recipeId(captured.recipe),
-        });
-      } else {
-        ledger.append("recipe.not-captured", {
-          attemptId,
-          itemId: item.itemId,
-          reason: captured.error,
-        });
-      }
+      recipeJson = captureAttemptRecipe({ ledger, attempt, item, runId, attemptId });
     }
   }
 
-  const record: AttemptRecord = {
+  const record = attemptRecord({ attemptId, item, attempt, status, reason, startedAt });
+  store.writeAttempt(runId, record, attemptFiles(attempt, recipeJson, verification));
+  ledger.append("attempt.done", { attemptId, itemId: item.itemId, status, rounds: attempt.rounds });
+
+  return {
+    attemptId,
+    status,
+    message: reason,
+    rounds: attempt.rounds,
+    usage: attempt.usage,
+    agentId: attempt.agentId,
+    ...(verification ? { verification } : {}),
+  };
+}
+
+/** Why a verified patch may not be applied here, or undefined when it may. */
+function patchRefusal(
+  cwd: string,
+  root: string,
+  diff: string,
+  files: string[],
+): string | undefined {
+  // The same rules the attempt was held to, checked again where the change reaches the project: the
+  // diff comes from a checkout that ran the project's code, so it is not trusted for having passed.
+  try {
+    assertPlainTextPatch(diff);
+  } catch (error) {
+    return errorMessage(error);
+  }
+  const refused = files.filter((file) => {
+    const kind = classifyPath(relative(resolve(cwd), resolve(root, file)));
+    return !["manifest", "lockfile", "patch", "install-state", "source"].includes(kind);
+  });
+  if (refused.length > 0) {
+    return `the change touches files that remediation may not change: ${refused.join(", ")}`;
+  }
+  const absolute = files.map((file) => resolve(root, file));
+  const outside = absolute.filter((file) => relative(resolve(cwd), file).startsWith(".."));
+  if (outside.length > 0) {
+    return `the change touches files outside the project directory: ${outside.join(", ")}`;
+  }
+  return undefined;
+}
+
+function promotionRequest(
+  params: Parameters<typeof promoteChange>[0],
+  before: Awaited<ReturnType<typeof createProjectSnapshot>>,
+): Parameters<PromoteDeps["verify"]>[0] {
+  return {
+    cwd: params.cwd,
+    ...(params.packageManager ? { packageManager: params.packageManager } : {}),
+    policy: params.policy,
+    baseFiles: before.fileSnapshots,
+    statusBefore: before.isGit ? (before.gitStatusBefore ?? []) : undefined,
+    advisories: params.advisories,
+    expectedRemaining: params.expectedRemaining,
+    options: { allowSourceEdits: true },
+    checks: PROMOTION_CHECKS,
+  };
+}
+
+interface CaptureInput {
+  ledger: ReturnType<RunStore["ledger"]>;
+  attempt: Awaited<ReturnType<RepairItemDeps["attempt"]>>;
+  item: PlanItem;
+  runId: string;
+  attemptId: string;
+}
+
+/** The recipe an agent's repair taught, as JSON, and a ledger entry saying whether one was kept. */
+function captureAttemptRecipe(input: CaptureInput): string | undefined {
+  const { ledger, attempt, item, runId, attemptId } = input;
+  const captured = recipeFromAttempt({
+    diff: attempt.diff,
+    packageName: item.packageName,
+    fromVersion: item.fromVersion,
+    toVersion: item.toVersion,
+    runId,
+    attemptId,
+    agentId: attempt.agentId,
+    failure: attempt.initialFailure,
+    verification: attempt.verification,
+    summary: attempt.reason,
+  });
+  if ("recipe" in captured) {
+    ledger.append("recipe.captured", {
+      attemptId,
+      itemId: item.itemId,
+      recipeId: recipeId(captured.recipe),
+    });
+    return serializeRecipe(captured.recipe);
+  }
+  ledger.append("recipe.not-captured", {
+    attemptId,
+    itemId: item.itemId,
+    reason: captured.error,
+  });
+  return undefined;
+}
+
+type AttemptOutcome = Awaited<ReturnType<RepairItemDeps["attempt"]>>;
+
+function attemptRecord(input: {
+  attemptId: string;
+  item: PlanItem;
+  attempt: AttemptOutcome;
+  status: AttemptStatus;
+  reason: string;
+  startedAt: string;
+}): AttemptRecord {
+  const { attemptId, item, attempt, status, reason, startedAt } = input;
+  return {
     attemptId,
     itemId: item.itemId,
     agentId: attempt.agentId,
@@ -324,7 +378,15 @@ export async function repairItem(
     startedAt,
     endedAt: new Date().toISOString(),
   };
-  store.writeAttempt(runId, record, {
+}
+
+/** The files kept with an attempt: its patch, recipe, verification result and transcript. */
+function attemptFiles(
+  attempt: AttemptOutcome,
+  recipeJson: string | undefined,
+  verification: VerificationResult | undefined,
+): Record<string, string> {
+  return {
     ...(attempt.diff ? { "diff.patch": attempt.diff } : {}),
     ...(recipeJson ? { "recipe.json": recipeJson } : {}),
     ...(verification ? { "verification.json": `${JSON.stringify(verification, null, 2)}\n` } : {}),
@@ -333,16 +395,5 @@ export async function repairItem(
           "transcript.jsonl": `${attempt.transcript.map((entry) => JSON.stringify(entry)).join("\n")}\n`,
         }
       : {}),
-  });
-  ledger.append("attempt.done", { attemptId, itemId: item.itemId, status, rounds: attempt.rounds });
-
-  return {
-    attemptId,
-    status,
-    message: reason,
-    rounds: attempt.rounds,
-    usage: attempt.usage,
-    agentId: attempt.agentId,
-    ...(verification ? { verification } : {}),
   };
 }
