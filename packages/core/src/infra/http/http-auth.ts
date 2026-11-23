@@ -202,7 +202,11 @@ export function authorizeRole(
     return { ok: false, status: 401, error: "Unauthorized: Missing or invalid Bearer token" };
   }
 
-  const userRole = getRoleForToken(authHeader.slice("Bearer ".length).trim());
+  const userRole = getRoleForToken(
+    authHeader.slice("Bearer ".length).trim(),
+    env["AUTOREMEDIATOR_API_TOKENS"],
+    env["AUTOREMEDIATOR_JWT_SECRET"],
+  );
   if (!userRole) {
     return { ok: false, status: 401, error: "Unauthorized: Invalid or expired API token" };
   }
