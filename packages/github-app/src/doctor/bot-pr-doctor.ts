@@ -172,72 +172,13 @@ export async function runBotPrDoctor(params: BotPrDoctorParams): Promise<Remedia
   const botName = botKind === "dependabot" ? "Dependabot" : "Renovate";
 
   try {
-    const logs = await collectCheckRunLogs(octokit, { owner, repo }, checkRun, params.logger);
-    const diagnostic = parseCheckRunLogs(logs);
-
-    const changedFiles = await listPullRequestChangedFiles(octokit, { owner, repo, pullNumber });
-    const findingsByFile = new Map<string, DiagnosticFinding[]>();
-    for (const finding of diagnostic.findings) {
-      if (!finding.filePath || repairPathProblem(finding.filePath)) continue;
-      if (!changedFiles.has(finding.filePath)) continue;
-      const existing = findingsByFile.get(finding.filePath) ?? [];
-      existing.push(finding);
-      findingsByFile.set(finding.filePath, existing);
-    }
-
-    const report = (outcome: string) =>
-      diagnosisComment({
-        botName,
-        checkRunName: checkName,
-        attempt,
-        maxAttempts: doctor.maxAttempts,
-        outcome,
-        diagnostic,
-      });
-
-    if (findingsByFile.size === 0) {
-      await comment(
-        params,
-        report(
-          "No repair was pushed: the output does not point at a source file this pull request changed and that is safe to edit.",
-        ),
-        "bot-pr-doctor.unlocalized",
-      );
-      return skip("No repairable file found in the check output");
-    }
-
-    const { healedFiles } = await repairBranchFiles({
-      octokit,
-      owner,
-      repo,
-      branchName: headRef,
-      findingsByFile,
-      allowedFiles: changedFiles,
-      strategy: params.strategy,
-      commitMessage: `fix: repair ${oneLine(checkName, 60)} after dependency update (autoremediator bot PR doctor, attempt ${attempt}/${doctor.maxAttempts})`,
-      logger: params.logger,
-      pullNumber,
+    return await attemptRepair(params, {
+      headRef,
+      botName,
+      checkName,
+      attempt,
+      maxAttempts: doctor.maxAttempts,
     });
-
-    if (healedFiles.length === 0) {
-      await comment(
-        params,
-        report("No repair was pushed: the errors are not ones it can fix safely."),
-        "bot-pr-doctor.unrepaired",
-      );
-      return skip("Failure could not be repaired safely");
-    }
-
-    await comment(
-      params,
-      report(
-        `Pushed a repair commit to \`${oneLine(headRef, 100)}\` touching ${healedFiles
-          .map((file) => `\`${oneLine(file, 120)}\``)
-          .join(", ")}. CI will run again.`,
-      ),
-      "bot-pr-doctor.repaired",
-    );
-    return { status: "success", reason: `Pushed repair for ${healedFiles.join(", ")}` };
   } catch (error) {
     // The attempt is already counted, so a retry of this job would be skipped as a duplicate;
     // report the failure instead of throwing.
@@ -253,4 +194,87 @@ export async function runBotPrDoctor(params: BotPrDoctorParams): Promise<Remedia
     });
     return { status: "failed", reason: "Bot PR doctor failed; see the app logs" };
   }
+}
+
+interface RepairContext {
+  headRef: string;
+  botName: string;
+  checkName: string;
+  attempt: number;
+  maxAttempts: number;
+}
+
+/** One repair attempt: read the failing check's output, fix what points at changed files, comment. */
+async function attemptRepair(
+  params: BotPrDoctorParams,
+  context: RepairContext,
+): Promise<RemediationJobResult> {
+  const { octokit, owner, repo, pullNumber, checkRun } = params;
+  const { headRef, botName, checkName, attempt, maxAttempts } = context;
+  const logs = await collectCheckRunLogs(octokit, { owner, repo }, checkRun, params.logger);
+  const diagnostic = parseCheckRunLogs(logs);
+
+  const changedFiles = await listPullRequestChangedFiles(octokit, { owner, repo, pullNumber });
+  const findingsByFile = new Map<string, DiagnosticFinding[]>();
+  for (const finding of diagnostic.findings) {
+    if (!finding.filePath || repairPathProblem(finding.filePath)) continue;
+    if (!changedFiles.has(finding.filePath)) continue;
+    const existing = findingsByFile.get(finding.filePath) ?? [];
+    existing.push(finding);
+    findingsByFile.set(finding.filePath, existing);
+  }
+
+  const report = (outcome: string) =>
+    diagnosisComment({
+      botName,
+      checkRunName: checkName,
+      attempt,
+      maxAttempts,
+      outcome,
+      diagnostic,
+    });
+
+  if (findingsByFile.size === 0) {
+    await comment(
+      params,
+      report(
+        "No repair was pushed: the output does not point at a source file this pull request changed and that is safe to edit.",
+      ),
+      "bot-pr-doctor.unlocalized",
+    );
+    return skip("No repairable file found in the check output");
+  }
+
+  const { healedFiles } = await repairBranchFiles({
+    octokit,
+    owner,
+    repo,
+    branchName: headRef,
+    findingsByFile,
+    allowedFiles: changedFiles,
+    strategy: params.strategy,
+    commitMessage: `fix: repair ${oneLine(checkName, 60)} after dependency update (autoremediator bot PR doctor, attempt ${attempt}/${maxAttempts})`,
+    logger: params.logger,
+    pullNumber,
+  });
+
+  if (healedFiles.length === 0) {
+    await comment(
+      params,
+      report("No repair was pushed: the errors are not ones it can fix safely."),
+      "bot-pr-doctor.unrepaired",
+    );
+    return skip("Failure could not be repaired safely");
+  }
+
+  await comment(
+    params,
+    report(
+      `Pushed a repair commit to \`${oneLine(headRef, 100)}\` touching ${healedFiles
+        .map((file) => `\`${oneLine(file, 120)}\``)
+        .join(", ")}. CI will run again.`,
+    ),
+    "bot-pr-doctor.repaired",
+  );
+  return { status: "success", reason: `Pushed repair for ${healedFiles.join(", ")}` };
 }

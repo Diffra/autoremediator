@@ -3,6 +3,7 @@ import { join, relative, sep } from "node:path";
 
 import { discoverProjectFiles } from "../../../infra/rollback/rollback.js";
 import { sha256 } from "../../../shared/hash.js";
+import type { PlanItem } from "../../runs/index.js";
 import type { RunRecord, RunStore } from "../../runs/run-store.js";
 
 export const STATEMENT_TYPE = "https://in-toto.io/Statement/v1";
@@ -74,48 +75,10 @@ export function buildRunStatement(input: {
   const events = ledger.read();
   const head = events.at(-1);
 
-  const outcomes = new Map<
-    string,
-    { outcome: ItemOutcome; verified?: boolean; failedCheck?: string }
-  >();
-  for (const event of events) {
-    const itemId = typeof event.data["itemId"] === "string" ? event.data["itemId"] : undefined;
-    if (!itemId) continue;
-    if (event.type === "item.done") {
-      outcomes.set(itemId, {
-        outcome: event.data["status"] === "applied" ? "applied" : "failed",
-        verified: event.data["verified"] === true,
-      });
-    } else if (event.type === "item.rejected") {
-      outcomes.set(itemId, {
-        outcome: "rejected",
-        ...(typeof event.data["failedCheck"] === "string"
-          ? { failedCheck: event.data["failedCheck"] }
-          : {}),
-      });
-    } else if (event.type === "item.error") {
-      outcomes.set(itemId, { outcome: "failed" });
-    }
-  }
+  const outcomes = itemOutcomes(events);
 
   const plan = store.readPlan(run.runId);
-  let verification: unknown;
-  let verificationSha256: string | undefined;
-  if (store.hasFile(run.runId, "verification.json")) {
-    const raw = readFileSync(join(store.runDir(run.runId), "verification.json"), "utf8");
-    verificationSha256 = sha256(raw);
-    const parsed = JSON.parse(raw) as {
-      passed?: boolean;
-      failedCheck?: string;
-      checks?: Array<{ name: string; status: string }>;
-    };
-    verification = {
-      passed: parsed.passed === true,
-      ...(parsed.failedCheck ? { failedCheck: parsed.failedCheck } : {}),
-      checks: (parsed.checks ?? []).map((entry) => ({ name: entry.name, status: entry.status })),
-      sha256: verificationSha256,
-    };
-  }
+  const verification = readVerification(store, run.runId);
 
   const ledgerFile = join(store.runDir(run.runId), "steps.jsonl");
   const predicate = {
@@ -135,21 +98,7 @@ export function buildRunStatement(input: {
         ? { projectMatchesRunEnd: input.currentFilesSha256 === (run.after ?? run.base).filesSha256 }
         : {}),
     },
-    items: (plan?.items ?? []).map((item) => {
-      const seen = outcomes.get(item.itemId);
-      return {
-        itemId: item.itemId,
-        cveId: item.cveId,
-        packageName: item.packageName,
-        fromVersion: item.fromVersion,
-        toVersion: item.toVersion,
-        strategy: item.strategy,
-        rollback: item.rollback,
-        outcome: seen?.outcome ?? "not-attempted",
-        verified: seen?.verified,
-        failedCheck: seen?.failedCheck,
-      };
-    }),
+    items: (plan?.items ?? []).map((item) => describeItem(item, outcomes.get(item.itemId))),
     skipped: (plan?.skipped ?? []).map((skip) => ({
       cveId: skip.cveId,
       packageName: skip.packageName,
@@ -175,5 +124,68 @@ export function buildRunStatement(input: {
       predicateType: RUN_PREDICATE_TYPE,
       predicate,
     },
+  };
+}
+
+type ItemOutcomes = Map<string, { outcome: ItemOutcome; verified?: boolean; failedCheck?: string }>;
+
+/** What the ledger says happened to each plan item, by item id. */
+function itemOutcomes(events: ReturnType<ReturnType<RunStore["ledger"]>["read"]>): ItemOutcomes {
+  const outcomes: ItemOutcomes = new Map();
+  for (const event of events) {
+    const itemId = typeof event.data["itemId"] === "string" ? event.data["itemId"] : undefined;
+    if (!itemId) continue;
+    if (event.type === "item.done") {
+      outcomes.set(itemId, {
+        outcome: event.data["status"] === "applied" ? "applied" : "failed",
+        verified: event.data["verified"] === true,
+      });
+    } else if (event.type === "item.rejected") {
+      outcomes.set(itemId, {
+        outcome: "rejected",
+        ...(typeof event.data["failedCheck"] === "string"
+          ? { failedCheck: event.data["failedCheck"] }
+          : {}),
+      });
+    } else if (event.type === "item.error") {
+      outcomes.set(itemId, { outcome: "failed" });
+    }
+  }
+  return outcomes;
+}
+
+/** The verifier's recorded result for the run, with the hash of the file it was read from. */
+function readVerification(store: RunStore, runId: string): Record<string, unknown> | undefined {
+  if (!store.hasFile(runId, "verification.json")) {
+    return undefined;
+  }
+  const raw = readFileSync(join(store.runDir(runId), "verification.json"), "utf8");
+  const parsed = JSON.parse(raw) as {
+    passed?: boolean;
+    failedCheck?: string;
+    checks?: Array<{ name: string; status: string }>;
+  };
+  return {
+    passed: parsed.passed === true,
+    ...(parsed.failedCheck ? { failedCheck: parsed.failedCheck } : {}),
+    checks: (parsed.checks ?? []).map((entry) => ({ name: entry.name, status: entry.status })),
+    sha256: sha256(raw),
+  };
+}
+
+type ItemOutcomeEntry = ItemOutcomes extends Map<string, infer Entry> ? Entry : never;
+
+function describeItem(item: PlanItem, seen: ItemOutcomeEntry | undefined) {
+  return {
+    itemId: item.itemId,
+    cveId: item.cveId,
+    packageName: item.packageName,
+    fromVersion: item.fromVersion,
+    toVersion: item.toVersion,
+    strategy: item.strategy,
+    rollback: item.rollback,
+    outcome: seen?.outcome ?? "not-attempted",
+    verified: seen?.verified,
+    failedCheck: seen?.failedCheck,
   };
 }
