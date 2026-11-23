@@ -177,16 +177,50 @@ export function buildCraDraft(input: {
   const status =
     findings.find((finding) => finding.status === "affected")?.status ?? findings[0]!.status;
 
-  const due = (value: string | undefined, hours: string, what: string): string =>
-    value
-      ? `**Due: ${value}** (${what})`
-      : `Due: ${TODO(`no awareness timestamp was given, so no deadline was computed; it is ${hours} after the moment you became aware`)}`;
+  const context: DraftContext = { cveId, details, findings, product, deadlines };
+  const lines: string[] = [
+    ...craIntro(input, context),
+    ...earlyWarningSection(context),
+    ...notificationSection(context),
+    ...finalReportSection(context),
+    ...CRA_CLOSING,
+  ];
 
-  const finalDue = deadlines?.finalReportDue
+  return {
+    cveId,
+    fileName: `${safeFileStem(cveId)}.md`,
+    markdown: lines.join("\n"),
+    ...(deadlines ? { deadlines } : {}),
+    status,
+  };
+}
+
+interface DraftContext {
+  cveId: string;
+  details: CveDetails | null | undefined;
+  findings: VexFinding[];
+  product: ProductIdentity;
+  deadlines: ReturnType<typeof craDeadlines> | undefined;
+}
+
+function dueLine(value: string | undefined, hours: string, what: string): string {
+  return value
+    ? `**Due: ${value}** (${what})`
+    : `Due: ${TODO(`no awareness timestamp was given, so no deadline was computed; it is ${hours} after the moment you became aware`)}`;
+}
+
+function finalDueLine(deadlines: DraftContext["deadlines"]): string {
+  return deadlines?.finalReportDue
     ? `**Due: ${deadlines.finalReportDue}** (corrective measure available + 14 days)`
     : `Due: ${TODO("the date a corrective or mitigating measure became available to users, plus 14 days; pass --corrective-measure-at <ISO 8601 with time zone> together with --awareness-at to compute it")}`;
+}
 
-  const lines: string[] = [
+function craIntro(
+  input: { awareness?: Date; generatedAt: Date; toolVersion: string },
+  context: DraftContext,
+): string[] {
+  const { cveId, deadlines } = context;
+  return [
     `# DRAFT: Cyber Resilience Act Article 14 reports for ${cveId}`,
     "",
     "> **DRAFT. NOT SUBMITTED. NOT LEGAL ADVICE. NOT A COMPLIANCE CLAIM.**",
@@ -215,10 +249,16 @@ export function buildCraDraft(input: {
     "All times are UTC. Deadlines are plain hour and day arithmetic from the timestamps you gave; whether",
     "any rule on how periods are counted applies to your case is for you or your counsel to confirm.",
     "",
+  ];
+}
+
+function earlyWarningSection(context: DraftContext): string[] {
+  const { cveId, details, product, deadlines } = context;
+  return [
     "## 1. Early warning",
     "",
     "Article 14(2)(a): without undue delay and in any event within 24 hours of becoming aware.",
-    due(deadlines?.earlyWarningDue, "24 hours", "awareness + 24 hours"),
+    dueLine(deadlines?.earlyWarningDue, "24 hours", "awareness + 24 hours"),
     "",
     "Pre-filled from local data:",
     "",
@@ -231,10 +271,16 @@ export function buildCraDraft(input: {
     `- Member States where you know the product has been made available (where applicable): ${TODO("list the Member States")}`,
     `- Your contact point for this report: ${TODO("name, role and contact details; not taken from any local file")}`,
     "",
+  ];
+}
+
+function notificationSection(context: DraftContext): string[] {
+  const { cveId, details, findings, product, deadlines } = context;
+  return [
     "## 2. Vulnerability notification",
     "",
     "Article 14(2)(b): within 72 hours of becoming aware, unless the information was already provided.",
-    due(deadlines?.notificationDue, "72 hours", "awareness + 72 hours"),
+    dueLine(deadlines?.notificationDue, "72 hours", "awareness + 72 hours"),
     "",
     "Pre-filled from local data:",
     "",
@@ -257,10 +303,16 @@ export function buildCraDraft(input: {
     `- Corrective or mitigating measures users can take: ${TODO("for example the product version that contains the fix; the pre-filled measures above concern your dependencies, not your users' actions")}`,
     `- How sensitive you consider the information to be (where applicable): ${TODO("your assessment")}`,
     "",
+  ];
+}
+
+function finalReportSection(context: DraftContext): string[] {
+  const { cveId, details, findings, deadlines } = context;
+  return [
     "## 3. Final report",
     "",
     "Article 14(2)(c): no later than 14 days after a corrective or mitigating measure is available, unless the information was already provided.",
-    finalDue,
+    finalDueLine(deadlines),
     "",
     "Pre-filled from local data:",
     "",
@@ -281,23 +333,18 @@ export function buildCraDraft(input: {
     ...measuresBlock(findings),
     `- Release that ships the fix to your users: ${TODO("version and date")}`,
     "",
-    "## Afterwards",
-    "",
-    "- Article 14(8): inform the impacted users, and where appropriate all users, about the vulnerability and the measures they can take, where appropriate in a structured, machine-readable format. `vex/vex.cdx.json` and `vex/vex.openvex.json` in this pack are machine-readable statements about your dependencies; whether they suit your users is your decision.",
-    "- Article 14(6): the CSIRT may ask for an intermediate report.",
-    "",
-    "## Sources",
-    "",
-    "- Regulation (EU) 2024/2847 (Cyber Resilience Act), Official Journal L, 20.11.2024; Article 14 paragraphs 1, 2, 6, 7 and 8, Article 3(42), Article 16.",
-    "- The field lists above follow the text of Article 14(2) as read on springlex.eu and cross-checked against secondary commentary; confirm them against the Official Journal text and against the fields the reporting platform actually shows.",
-    "",
   ];
-
-  return {
-    cveId,
-    fileName: `${safeFileStem(cveId)}.md`,
-    markdown: lines.join("\n"),
-    ...(deadlines ? { deadlines } : {}),
-    status,
-  };
 }
+
+const CRA_CLOSING: string[] = [
+  "## Afterwards",
+  "",
+  "- Article 14(8): inform the impacted users, and where appropriate all users, about the vulnerability and the measures they can take, where appropriate in a structured, machine-readable format. `vex/vex.cdx.json` and `vex/vex.openvex.json` in this pack are machine-readable statements about your dependencies; whether they suit your users is your decision.",
+  "- Article 14(6): the CSIRT may ask for an intermediate report.",
+  "",
+  "## Sources",
+  "",
+  "- Regulation (EU) 2024/2847 (Cyber Resilience Act), Official Journal L, 20.11.2024; Article 14 paragraphs 1, 2, 6, 7 and 8, Article 3(42), Article 16.",
+  "- The field lists above follow the text of Article 14(2) as read on springlex.eu and cross-checked against secondary commentary; confirm them against the Official Journal text and against the fields the reporting platform actually shows.",
+  "",
+];
