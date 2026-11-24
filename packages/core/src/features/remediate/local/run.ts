@@ -1,28 +1,9 @@
-import { isPackageAllowed, loadPolicy } from "../../../infra/policy/policy.js";
+import { loadPolicy } from "../../../infra/policy/policy.js";
 import { createProjectSnapshot } from "../../../infra/rollback/rollback.js";
-import { enrichWithCisaKev } from "../../intelligence/sources/cisa-kev.js";
-import { enrichWithEpss } from "../../intelligence/sources/epss.js";
-import {
-  lookupCveGitHub,
-  mergeGhDataIntoCveDetails,
-} from "../../intelligence/sources/github-advisory.js";
-import { enrichWithNvd } from "../../intelligence/sources/nvd.js";
-import { lookupCveOsv } from "../../intelligence/sources/osv.js";
-import {
-  loadIntelligenceSnapshot,
-  lookupSnapshotCve,
-} from "../../intelligence/sources/snapshot.js";
 import type { CveDetails, VulnerablePackage } from "../../intelligence/types.js";
-import {
-  findMaintainerVex,
-  readInstalledMaintainerVex,
-  type MaintainerVexIndex,
-} from "../../maintainer-vex/index.js";
-import { loadMemoryConstraints, pinnedMessage, rejectedMessage } from "../../memory/consume.js";
+import { loadMemoryConstraints } from "../../memory/consume.js";
 import type { PatchGenerator } from "../../patch/patch-generator.js";
 import { resolvePatchGenerator } from "../../patch/resolve.js";
-import { assessPackageReachability } from "../../reachability/check-reachability.js";
-import { computeEscalationAction } from "../escalation.js";
 import { checkInventoryTool } from "../tools/check-inventory.js";
 import type {
   LlmUsageMetrics,
@@ -30,149 +11,114 @@ import type {
   RemediateOptions,
   RemediationReport,
 } from "../types.js";
-import { applyDispositionAndContainment } from "./disposition.js";
-import { shouldAttemptPatchFallback, tryPatchFallback } from "./fallback.js";
-import { resolveLocalRunOptions } from "./options.js";
-import { resolvePrimaryResult } from "./primary-strategy.js";
+import { lookupCveDetails } from "./cve-lookup.js";
+import { resolveLocalRunOptions, type LocalRunOptions } from "./options.js";
+import { type PackageRunContext, remediateVulnerable } from "./package-remediation.js";
 import { buildSbom, sbomKey } from "./sbom.js";
-import { runSecOpsPreflight } from "./secops-preflight.js";
+import { runSecOpsPreflight, type SecOpsPreflightResult } from "./secops-preflight.js";
 import { buildLocalSummary } from "./summary.js";
 import { findVulnerablePackages } from "./vulnerability-match.js";
+
+type Correlation = NonNullable<RemediationReport["correlation"]>;
+
+/** The report for a CVE a VEX suppression covers: nothing is modified, but VEX and SBOM still show it. */
+async function suppressedReport(
+  cveId: string,
+  cveDetails: CveDetails,
+  suppression: Extract<SecOpsPreflightResult, { suppressed: true }>,
+  run: { options: RemediateOptions; resolved: LocalRunOptions; correlation: Correlation },
+): Promise<RemediationReport> {
+  const { options, resolved, correlation } = run;
+  // The report still names the installed copies the CVE covers, so VEX can assert not_affected.
+  const inventory =
+    cveDetails.affectedPackages.length > 0
+      ? await checkInventoryTool.execute({
+          cwd: resolved.cwd,
+          packageManager: resolved.packageManager,
+          policy: options.policy,
+          workspace: resolved.constraints.workspace,
+        })
+      : { packages: [] };
+  const installed = inventory.error ? [] : inventory.packages;
+  const packages = findVulnerablePackages(cveDetails, installed);
+  const suppressedBy = {
+    justification: suppression.suppression.justification,
+    ...(suppression.suppression.notes ? { notes: suppression.suppression.notes } : {}),
+  };
+  const results: PatchResult[] = packages.map((vulnerable) => ({
+    packageName: vulnerable.installed.name,
+    fromVersion: vulnerable.installed.version,
+    strategy: "none",
+    applied: false,
+    dryRun: resolved.dryRun,
+    dependencyScope: vulnerable.installed.type === "direct" ? "direct" : "transitive",
+    suppressedBy,
+    message: suppression.summary,
+  }));
+  return {
+    cveId,
+    cveDetails,
+    vulnerablePackages: packages,
+    results,
+    summary: suppression.summary,
+    sbom: buildSbom(
+      installed,
+      new Set(packages.map((v) => sbomKey(v.installed.name, v.installed.version))),
+      results,
+    ),
+    correlation,
+  };
+}
 
 export async function runLocalRemediationPipeline(
   cveId: string,
   options: RemediateOptions = {},
 ): Promise<RemediationReport> {
   const resolved = resolveLocalRunOptions(options);
-  const { cwd, packageManager, dryRun, constraints } = resolved;
-
-  const correlation = {
+  const { cwd, packageManager, constraints } = resolved;
+  const correlation: Correlation = {
     requestId: options.requestId,
     sessionId: options.sessionId,
     parentRunId: options.parentRunId,
   };
-
-  let generatorPromise: Promise<PatchGenerator | undefined> | undefined;
-  const getGenerator = () =>
-    (generatorPromise ??= resolvePatchGenerator({
-      patchGenerator: options.patchGenerator,
-      model: resolved.model,
-    }));
-
-  const collectedResults: PatchResult[] = [];
-  const llmUsage: LlmUsageMetrics[] = [];
-  let vulnerablePackages: VulnerablePackage[] = [];
-  let cveDetails: CveDetails | null = null;
-
   const normalizedId = cveId.toUpperCase();
-  let osvDetails: Awaited<ReturnType<typeof lookupCveOsv>> = null;
-  let ghPackages: Awaited<ReturnType<typeof lookupCveGitHub>> = [];
+  const unresolved = (
+    summary: string,
+    cveDetails: CveDetails | null,
+    extra: Partial<RemediationReport> = {},
+  ): RemediationReport => ({
+    cveId,
+    cveDetails,
+    vulnerablePackages: [],
+    results: [],
+    summary,
+    ...extra,
+    correlation,
+  });
 
-  if (resolved.offlineIntelligence) {
-    if (resolved.intelligenceSnapshotPath) {
-      osvDetails = lookupSnapshotCve(
-        loadIntelligenceSnapshot(resolved.intelligenceSnapshotPath),
-        normalizedId,
-      );
-    }
-  } else {
-    [osvDetails, ghPackages] = await Promise.all([
-      lookupCveOsv(normalizedId),
-      lookupCveGitHub(normalizedId).catch(() => []),
-    ]);
-  }
-
-  if (!osvDetails && ghPackages.length === 0) {
-    return {
-      cveId,
-      cveDetails: null,
-      vulnerablePackages,
-      results: collectedResults,
-      summary: resolved.offlineIntelligence
+  const cveDetails = await lookupCveDetails(normalizedId, resolved);
+  if (!cveDetails) {
+    return unresolved(
+      resolved.offlineIntelligence
         ? `Offline mode: ${normalizedId} not found in intelligence snapshot.`
         : `Local mode failed at lookup-cve: ${normalizedId} not found in OSV or GitHub advisory data.`,
-      correlation,
-    };
-  }
-
-  cveDetails = osvDetails ?? {
-    id: normalizedId,
-    summary: "Details sourced from GitHub Advisory Database.",
-    severity: "UNKNOWN",
-    references: [],
-    affectedPackages: [],
-  };
-
-  if (ghPackages.length > 0) {
-    cveDetails = mergeGhDataIntoCveDetails(cveDetails, ghPackages);
-  }
-  if (!resolved.offlineIntelligence) {
-    cveDetails = await enrichWithNvd(cveDetails);
-    // Exploit signals feed exploitSignalOverride and disposition; without them those gates never fire.
-    cveDetails = await enrichWithCisaKev(cveDetails);
-    cveDetails = await enrichWithEpss(cveDetails);
+      null,
+    );
   }
 
   const preflight = await runSecOpsPreflight(normalizedId, cveDetails, resolved);
-
   if (preflight.suppressed) {
-    // Nothing is modified for a suppressed CVE, but the report still names the installed copies it
-    // covers so VEX can assert not_affected and the SBOM can mark them suppressed.
-    const suppressedInventory =
-      cveDetails.affectedPackages.length > 0
-        ? await checkInventoryTool.execute({
-            cwd,
-            packageManager,
-            policy: options.policy,
-            workspace: constraints.workspace,
-          })
-        : { packages: [] };
-    const suppressedInstalled = suppressedInventory.error ? [] : suppressedInventory.packages;
-    const suppressedPackages = findVulnerablePackages(cveDetails, suppressedInstalled);
-    const suppressedBy = {
-      justification: preflight.suppression.justification,
-      ...(preflight.suppression.notes ? { notes: preflight.suppression.notes } : {}),
-    };
-
-    const suppressedResults: PatchResult[] = suppressedPackages.map((vulnerable) => ({
-      packageName: vulnerable.installed.name,
-      fromVersion: vulnerable.installed.version,
-      strategy: "none",
-      applied: false,
-      dryRun,
-      dependencyScope: vulnerable.installed.type === "direct" ? "direct" : "transitive",
-      suppressedBy,
-      message: preflight.summary,
-    }));
-
-    return {
-      cveId,
-      cveDetails,
-      vulnerablePackages: suppressedPackages,
-      results: suppressedResults,
-      summary: preflight.summary,
-      sbom: buildSbom(
-        suppressedInstalled,
-        new Set(suppressedPackages.map((v) => sbomKey(v.installed.name, v.installed.version))),
-        suppressedResults,
-      ),
-      correlation,
-    };
+    return suppressedReport(cveId, cveDetails, preflight, { options, resolved, correlation });
   }
-
   const { exploitSignalTriggered, slaBreaches } = preflight;
+  const signals = { exploitSignalTriggered, slaBreaches };
 
   if (cveDetails.affectedPackages.length === 0) {
-    return {
-      cveId,
+    return unresolved(
+      `Local mode lookup succeeded but no npm affected packages were found for ${normalizedId}.`,
       cveDetails,
-      vulnerablePackages,
-      results: collectedResults,
-      summary: `Local mode lookup succeeded but no npm affected packages were found for ${normalizedId}.`,
-      exploitSignalTriggered,
-      slaBreaches,
-      correlation,
-    };
+      signals,
+    );
   }
 
   const inventory = await checkInventoryTool.execute({
@@ -181,213 +127,96 @@ export async function runLocalRemediationPipeline(
     policy: options.policy,
     workspace: constraints.workspace,
   });
-
   if (inventory?.error) {
-    return {
-      cveId,
+    return unresolved(
+      `Local mode failed at check-inventory: ${inventory.error}`,
       cveDetails,
-      vulnerablePackages,
-      results: collectedResults,
-      summary: `Local mode failed at check-inventory: ${inventory.error}`,
-      exploitSignalTriggered,
-      slaBreaches,
+      signals,
+    );
+  }
+  const installedPackages = inventory.packages ?? [];
+  const vulnerablePackages = findVulnerablePackages(cveDetails, installedPackages);
+
+  const context = createRunContext(normalizedId, cveDetails, { options, resolved, signals });
+  const { results, llmUsage } = await remediateAll(context, vulnerablePackages);
+
+  return buildReport(
+    { cveId, cveDetails, vulnerablePackages, installedPackages, results },
+    {
+      llmUsage,
+      signals,
       correlation,
-    };
-  }
-
-  const installedPackages = (inventory.packages ?? []) as Array<{
-    name: string;
-    version: string;
-    type: "direct" | "transitive";
-  }>;
-
-  vulnerablePackages = findVulnerablePackages(cveDetails, installedPackages);
-
-  const effectivePolicy = loadPolicy(cwd, options.policy);
-  const containmentMode = options.containmentMode ?? effectivePolicy.containmentMode ?? false;
-  const dispositionPolicy = options.dispositionPolicy ?? effectivePolicy.dispositionPolicy;
-  // What earlier runs and people recorded: pinned packages and upgrades that were tried and rejected.
-  const memory = resolved.ignoreMemory ? undefined : loadMemoryConstraints(cwd);
-
-  // Read the VEX documents installed packages ship once, and only when something is vulnerable.
-  let shippedVex: MaintainerVexIndex | undefined;
-
-  for (const vulnerable of vulnerablePackages) {
-    const snapshot = await createProjectSnapshot(cwd);
-
-    shippedVex ??= readInstalledMaintainerVex(cwd);
-    const maintainerVex = findMaintainerVex(shippedVex, normalizedId, vulnerable.installed);
-    const withMaintainerVex = (result: PatchResult): PatchResult => ({
-      ...result,
-      ...(maintainerVex.evidence.length > 0 ? { maintainerVex: maintainerVex.evidence } : {}),
-      ...(maintainerVex.ignored.length > 0 ? { maintainerVexIgnored: maintainerVex.ignored } : {}),
-    });
-
-    const finalizePatchResult = (result: PatchResult): PatchResult => {
-      const withDisposition = applyDispositionAndContainment(result, {
-        exploitSignalTriggered,
-        slaBreaches,
-        severity: cveDetails?.severity,
-        policy: dispositionPolicy,
-        containmentMode,
-        cwd,
-        snapshot,
-      });
-      if (withDisposition.unresolvedReason) {
-        withDisposition.escalationAction = computeEscalationAction(
-          withDisposition.unresolvedReason,
-          resolved.escalationGraph,
-        );
-      }
-      return withMaintainerVex(withDisposition);
-    };
-
-    if (!isPackageAllowed(effectivePolicy, vulnerable.installed.name)) {
-      collectedResults.push(
-        finalizePatchResult({
-          packageName: vulnerable.installed.name,
-          fromVersion: vulnerable.installed.version,
-          strategy: "none",
-          applied: false,
-          dryRun,
-          unresolvedReason: "policy-blocked",
-          message: `Policy denyPackages blocked changes for package "${vulnerable.installed.name}".`,
-        }),
-      );
-      continue;
-    }
-
-    // A person's pin comes first: the package is left alone whatever else says.
-    const pinned = memory?.pinned.get(vulnerable.installed.name);
-    if (pinned) {
-      collectedResults.push(
-        finalizePatchResult({
-          packageName: vulnerable.installed.name,
-          fromVersion: vulnerable.installed.version,
-          strategy: "none",
-          applied: false,
-          dryRun,
-          unresolvedReason: "constraint-blocked",
-          message: pinnedMessage(pinned),
-        }),
-      );
-      continue;
-    }
-
-    // Opt-in only: by default the maintainer's verdict is evidence and remediation goes ahead.
-    const maintainerClaim = maintainerVex.evidence[0];
-    if (resolved.trustMaintainerVex && maintainerClaim) {
-      const { maintainer } = maintainerClaim;
-      collectedResults.push(
-        withMaintainerVex({
-          packageName: vulnerable.installed.name,
-          fromVersion: vulnerable.installed.version,
-          strategy: "none",
-          applied: false,
-          dryRun,
-          dependencyScope: vulnerable.installed.type === "direct" ? "direct" : "transitive",
-          suppressedBy: {
-            justification: "not_affected",
-            source: "maintainer-vex",
-            notes: `${maintainer.name}@${maintainer.version} (${maintainerClaim.author}): ${maintainerClaim.justification}${maintainerClaim.impactStatement ? `. ${maintainerClaim.impactStatement}` : ""}`,
-          },
-          message: `Suppressed by maintainer VEX: ${maintainer.name}@${maintainer.version} (author ${maintainerClaim.author}) declares not_affected (${maintainerClaim.justification}) for ${normalizedId}.`,
-        }),
-      );
-      continue;
-    }
-
-    if (resolved.skipUnreachable) {
-      const reach = assessPackageReachability(cwd, vulnerable.installed.name);
-      if (reach.status === "not-reachable") {
-        collectedResults.push(
-          finalizePatchResult({
-            packageName: vulnerable.installed.name,
-            fromVersion: vulnerable.installed.version,
-            strategy: "none",
-            applied: false,
-            dryRun,
-            message: `Skipped: '${vulnerable.installed.name}' is not reachable from source code.`,
-            reachability: reach,
-          }),
-        );
-        continue;
-      }
-    }
-    const primary = await resolvePrimaryResult({
-      vulnerable,
-      cwd,
-      packageManager,
-      dryRun,
-      policy: resolved.policy,
-      runTests: resolved.runTests,
-      constraints,
-      proofOfFix: resolved.proofOfFix,
-      requireProofOfFix: resolved.requireProofOfFix,
-      reproductionTest: options.reproductionTest,
-      patchesDir: resolved.patchesDir,
-      offlineIntelligence: resolved.offlineIntelligence,
-      rejectedVersions: new Map(
-        [...(memory?.rejected.get(vulnerable.installed.name) ?? [])].map(([version, entry]) => [
-          version,
-          rejectedMessage(entry),
-        ]),
-      ),
-    });
-
-    if (shouldAttemptPatchFallback(primary.result, constraints.preferVersionBump ?? false)) {
-      const fallback = await tryPatchFallback({
-        cwd,
-        packageManager,
-        packageName: vulnerable.installed.name,
-        vulnerableVersion: vulnerable.installed.version,
-        cveId: normalizedId,
-        cveSummary: cveDetails?.summary ?? normalizedId,
-        dependencyScope: vulnerable.installed.type === "direct" ? "direct" : "transitive",
-        dryRun,
-        runTests: resolved.runTests,
-        patchesDir: resolved.patchesDir,
-        getGenerator,
-        policy: options.policy,
-        patchConfidenceThresholds: resolved.patchConfidenceThresholds,
-        installMode: constraints.installMode,
-        installPreferOffline: constraints.installPreferOffline,
-        enforceFrozenLockfile: constraints.enforceFrozenLockfile,
-        workspace: constraints.workspace,
-        vulnerableRange: vulnerable.affected.vulnerableRange,
-        proofOfFix: resolved.proofOfFix,
-        requireProofOfFix: resolved.requireProofOfFix,
-      });
-      collectedResults.push(finalizePatchResult(fallback.result));
-      if (fallback.usage) {
-        llmUsage.push(...fallback.usage);
-      }
-      continue;
-    }
-
-    const primaryResult: PatchResult = {
-      ...primary.result,
-      dependencyScope: vulnerable.installed.type === "direct" ? "direct" : "transitive",
-    };
-
-    collectedResults.push(finalizePatchResult(primaryResult));
-  }
-
-  const vulnerableKeys = new Set(
-    vulnerablePackages.map((v) => sbomKey(v.installed.name, v.installed.version)),
+    },
   );
-  const sbom = buildSbom(installedPackages, vulnerableKeys, collectedResults);
+}
 
+function createRunContext(
+  cveId: string,
+  cveDetails: CveDetails,
+  run: {
+    options: RemediateOptions;
+    resolved: LocalRunOptions;
+    signals: PackageRunContext["preflight"];
+  },
+): PackageRunContext {
+  const { options, resolved, signals } = run;
+  let generatorPromise: Promise<PatchGenerator | undefined> | undefined;
   return {
     cveId,
     cveDetails,
+    options,
+    resolved,
+    policy: loadPolicy(resolved.cwd, options.policy),
+    // What earlier runs and people recorded: pinned packages and upgrades tried and rejected.
+    memory: resolved.ignoreMemory ? undefined : loadMemoryConstraints(resolved.cwd),
+    preflight: signals,
+    getGenerator: () =>
+      (generatorPromise ??= resolvePatchGenerator({
+        patchGenerator: options.patchGenerator,
+        model: resolved.model,
+      })),
+  };
+}
+
+async function remediateAll(context: PackageRunContext, vulnerablePackages: VulnerablePackage[]) {
+  const results: PatchResult[] = [];
+  const llmUsage: LlmUsageMetrics[] = [];
+  for (const vulnerable of vulnerablePackages) {
+    const snapshot = await createProjectSnapshot(context.resolved.cwd);
+    const outcome = await remediateVulnerable(context, vulnerable, snapshot);
+    results.push(outcome.result);
+    if (outcome.usage) llmUsage.push(...outcome.usage);
+  }
+  return { results, llmUsage };
+}
+
+function buildReport(
+  found: {
+    cveId: string;
+    cveDetails: CveDetails;
+    vulnerablePackages: VulnerablePackage[];
+    installedPackages: Array<{ name: string; version: string; type: "direct" | "transitive" }>;
+    results: PatchResult[];
+  },
+  extra: {
+    llmUsage: LlmUsageMetrics[];
+    signals: { exploitSignalTriggered?: boolean; slaBreaches?: RemediationReport["slaBreaches"] };
+    correlation: Correlation;
+  },
+): RemediationReport {
+  const { vulnerablePackages, results } = found;
+  const vulnerableKeys = new Set(
+    vulnerablePackages.map((v) => sbomKey(v.installed.name, v.installed.version)),
+  );
+  return {
+    cveId: found.cveId,
+    cveDetails: found.cveDetails,
     vulnerablePackages,
-    results: collectedResults,
-    summary: buildLocalSummary(vulnerablePackages, collectedResults),
-    llmUsage: llmUsage.length > 0 ? llmUsage : undefined,
-    exploitSignalTriggered,
-    slaBreaches,
-    sbom,
-    correlation,
+    results,
+    summary: buildLocalSummary(vulnerablePackages, results),
+    llmUsage: extra.llmUsage.length > 0 ? extra.llmUsage : undefined,
+    ...extra.signals,
+    sbom: buildSbom(found.installedPackages, vulnerableKeys, results),
+    correlation: extra.correlation,
   };
 }

@@ -10,6 +10,7 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const HOOK_FILES = [
   "register.ts",
   "runtime.ts",
+  "hook.ts",
   "wrap.ts",
   "esm-instrument.ts",
   "locate.ts",

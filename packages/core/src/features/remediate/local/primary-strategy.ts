@@ -27,7 +27,7 @@ function memoryBlocked(
   };
 }
 
-export async function resolvePrimaryResult(params: {
+interface PrimaryParams {
   vulnerable: VulnerablePackage;
   cwd: string;
   packageManager: PackageManager;
@@ -43,157 +43,155 @@ export async function resolvePrimaryResult(params: {
   offlineIntelligence?: boolean;
   /** Versions of this package remediation memory says were rejected, with why. */
   rejectedVersions?: ReadonlyMap<string, string>;
-}): Promise<{ result: PatchResult }> {
-  const {
-    vulnerable,
-    cwd,
-    packageManager,
-    dryRun,
-    policy,
-    runTests,
-    constraints,
-    proofOfFix,
-    requireProofOfFix = constraints.requireProofOfFix,
-    reproductionTest,
-    patchesDir,
-    offlineIntelligence,
-    rejectedVersions,
-  } = params;
+}
+
+/** A result that says why nothing was applied. */
+function unresolved(
+  vulnerable: VulnerablePackage,
+  dryRun: boolean,
+  reason: NonNullable<PatchResult["unresolvedReason"]>,
+  message: string,
+  withRange = true,
+): { result: PatchResult } {
   const pkg = vulnerable.installed;
-  const firstPatchedVersion = vulnerable.affected.firstPatchedVersion;
-  const registry = loadRegistryConfig(cwd);
-  const cooldown = readCooldown(cwd, packageManager);
-
-  if (pkg.type === "transitive") {
-    if (constraints.directDependenciesOnly) {
-      return {
-        result: {
-          packageName: pkg.name,
-          strategy: "none",
-          fromVersion: pkg.version,
-          applied: false,
-          dryRun,
-          unresolvedReason: "constraint-blocked",
-          message: `Constraint blocked remediation for transitive dependency "${pkg.name}".`,
-        },
-      };
-    }
-
-    if (constraints.preferVersionBump) {
-      return {
-        result: {
-          packageName: pkg.name,
-          strategy: "none",
-          fromVersion: pkg.version,
-          applied: false,
-          dryRun,
-          unresolvedReason: "constraint-blocked",
-          message: `Constraint prefers version-bump and rejected override remediation for "${pkg.name}".`,
-        },
-      };
-    }
-
-    if (!firstPatchedVersion) {
-      return {
-        result: {
-          packageName: pkg.name,
-          strategy: "none",
-          fromVersion: pkg.version,
-          applied: false,
-          dryRun,
-          unresolvedReason: "no-safe-version",
-          vulnerableRange: vulnerable.affected.vulnerableRange,
-          message: `No firstPatchedVersion available for ${pkg.name}; cannot resolve deterministic override in local mode.`,
-        },
-      };
-    }
-
-    const target = await selectUpgradeTarget({
+  return {
+    result: {
       packageName: pkg.name,
-      installedVersion: pkg.version,
-      firstPatchedVersion,
-      vulnerableRange: vulnerable.affected.vulnerableRange,
-      registry,
-      supplyChainPolicy: withCooldown(constraints.supplyChainPolicy, cooldown, pkg.name),
-      offline: offlineIntelligence,
-      rejected: rejectedVersions,
-    });
-
-    if (target.status === "memory-blocked") {
-      return { result: memoryBlocked(pkg, target, dryRun, vulnerable) };
-    }
-
-    if (target.status === "no-safe-version") {
-      return {
-        result: {
-          packageName: pkg.name,
-          strategy: "none",
-          fromVersion: pkg.version,
-          applied: false,
-          dryRun,
-          unresolvedReason: "no-safe-version",
-          vulnerableRange: vulnerable.affected.vulnerableRange,
-          message: `No safe override version found for ${pkg.name}.`,
-        },
-      };
-    }
-
-    if (target.status === "trust-blocked") {
-      return {
-        result: {
-          packageName: pkg.name,
-          strategy: "none",
-          fromVersion: pkg.version,
-          applied: false,
-          dryRun,
-          unresolvedReason: "policy-blocked",
-          vulnerableRange: vulnerable.affected.vulnerableRange,
-          message: `Supply chain trust gate blocked "${pkg.name}@${target.version}": ${target.reason}`,
-        },
-      };
-    }
-
-    const overrideResult = await applyPackageOverrideTool.execute({
-      cwd,
-      packageManager,
-      packageName: pkg.name,
+      strategy: "none",
       fromVersion: pkg.version,
-      toVersion: target.version,
+      applied: false,
       dryRun,
-      policy,
-      runTests,
-      installMode: constraints.installMode,
-      installPreferOffline: constraints.installPreferOffline,
-      enforceFrozenLockfile: constraints.enforceFrozenLockfile,
-      workspace: constraints.workspace,
-      proofOfFix,
-      requireProofOfFix,
-      reproductionTest,
-      patchesDir,
-    });
+      unresolvedReason: reason,
+      ...(withRange ? { vulnerableRange: vulnerable.affected.vulnerableRange } : {}),
+      message,
+    },
+  };
+}
 
-    return {
-      result: {
-        ...overrideResult,
-        vulnerableRange: vulnerable.affected.vulnerableRange,
-        message: `${overrideResult.message}${describeSkipped(target.skipped)}`,
-      },
-    };
+/** The constraints that rule out fixing a transitive dependency at all. */
+function transitiveConstraintBlock(params: PrimaryParams): { result: PatchResult } | undefined {
+  const { vulnerable, dryRun, constraints } = params;
+  const name = vulnerable.installed.name;
+  if (constraints.directDependenciesOnly) {
+    return unresolved(
+      vulnerable,
+      dryRun,
+      "constraint-blocked",
+      `Constraint blocked remediation for transitive dependency "${name}".`,
+      false,
+    );
   }
+  if (constraints.preferVersionBump) {
+    return unresolved(
+      vulnerable,
+      dryRun,
+      "constraint-blocked",
+      `Constraint prefers version-bump and rejected override remediation for "${name}".`,
+      false,
+    );
+  }
+  return undefined;
+}
 
+type Target = Awaited<ReturnType<typeof selectUpgradeTarget>>;
+
+/** The result for a target that cannot be applied. */
+function targetBlock(
+  params: PrimaryParams,
+  target: Exclude<Target, { status: "selected" }>,
+  kind: "override" | "upgrade",
+): { result: PatchResult } {
+  const { vulnerable, dryRun } = params;
+  const pkg = vulnerable.installed;
+  if (target.status === "memory-blocked") {
+    return { result: memoryBlocked(pkg, target, dryRun, vulnerable) };
+  }
+  if (target.status === "no-safe-version") {
+    return unresolved(
+      vulnerable,
+      dryRun,
+      "no-safe-version",
+      `No safe ${kind} version found for ${pkg.name}.`,
+    );
+  }
+  return unresolved(
+    vulnerable,
+    dryRun,
+    "policy-blocked",
+    `Supply chain trust gate blocked "${pkg.name}@${target.version}": ${target.reason}`,
+  );
+}
+
+function applyOverride(params: PrimaryParams, toVersion: string): Promise<PatchResult> {
+  const { vulnerable, constraints } = params;
+  return applyPackageOverrideTool.execute({
+    cwd: params.cwd,
+    packageManager: params.packageManager,
+    packageName: vulnerable.installed.name,
+    fromVersion: vulnerable.installed.version,
+    toVersion,
+    dryRun: params.dryRun,
+    policy: params.policy,
+    runTests: params.runTests,
+    installMode: constraints.installMode,
+    installPreferOffline: constraints.installPreferOffline,
+    enforceFrozenLockfile: constraints.enforceFrozenLockfile,
+    workspace: constraints.workspace,
+    proofOfFix: params.proofOfFix,
+    requireProofOfFix: params.requireProofOfFix ?? constraints.requireProofOfFix,
+    reproductionTest: params.reproductionTest,
+    patchesDir: params.patchesDir,
+  });
+}
+
+function applyBump(params: PrimaryParams, toVersion: string): Promise<PatchResult> {
+  const { vulnerable, constraints } = params;
+  return applyVersionBumpTool.execute({
+    cwd: params.cwd,
+    packageManager: params.packageManager,
+    packageName: vulnerable.installed.name,
+    fromVersion: vulnerable.installed.version,
+    toVersion,
+    dryRun: params.dryRun,
+    policy: params.policy,
+    runTests: params.runTests,
+    typecheck: constraints.typecheck,
+    installMode: constraints.installMode,
+    installPreferOffline: constraints.installPreferOffline,
+    enforceFrozenLockfile: constraints.enforceFrozenLockfile,
+    workspace: constraints.workspace,
+    breakingChangeRefactor: constraints.enableBreakingChangeRefactor,
+    proofOfFix: params.proofOfFix,
+    requireProofOfFix: params.requireProofOfFix ?? constraints.requireProofOfFix,
+    reproductionTest: params.reproductionTest,
+    patchesDir: params.patchesDir,
+  });
+}
+
+/**
+ * Fixes one vulnerable package the deterministic way: a version bump for a direct dependency, an
+ * override for a transitive one, once a safe, trusted target version has been chosen.
+ */
+export async function resolvePrimaryResult(
+  params: PrimaryParams,
+): Promise<{ result: PatchResult }> {
+  const { vulnerable, cwd, packageManager, dryRun, constraints } = params;
+  const pkg = vulnerable.installed;
+  const transitive = pkg.type === "transitive";
+  const kind = transitive ? "override" : "upgrade";
+
+  if (transitive) {
+    const blocked = transitiveConstraintBlock(params);
+    if (blocked) return blocked;
+  }
+  const firstPatchedVersion = vulnerable.affected.firstPatchedVersion;
   if (!firstPatchedVersion) {
-    return {
-      result: {
-        packageName: pkg.name,
-        strategy: "none",
-        fromVersion: pkg.version,
-        applied: false,
-        dryRun,
-        unresolvedReason: "no-safe-version",
-        vulnerableRange: vulnerable.affected.vulnerableRange,
-        message: `No firstPatchedVersion available for ${pkg.name}; cannot resolve deterministic upgrade in local mode.`,
-      },
-    };
+    return unresolved(
+      vulnerable,
+      dryRun,
+      "no-safe-version",
+      `No firstPatchedVersion available for ${pkg.name}; cannot resolve deterministic ${kind} in local mode.`,
+    );
   }
 
   const target = await selectUpgradeTarget({
@@ -201,72 +199,25 @@ export async function resolvePrimaryResult(params: {
     installedVersion: pkg.version,
     firstPatchedVersion,
     vulnerableRange: vulnerable.affected.vulnerableRange,
-    registry,
-    supplyChainPolicy: withCooldown(constraints.supplyChainPolicy, cooldown, pkg.name),
-    offline: offlineIntelligence,
-    rejected: rejectedVersions,
+    registry: loadRegistryConfig(cwd),
+    supplyChainPolicy: withCooldown(
+      constraints.supplyChainPolicy,
+      readCooldown(cwd, packageManager),
+      pkg.name,
+    ),
+    offline: params.offlineIntelligence,
+    rejected: params.rejectedVersions,
   });
+  if (target.status !== "selected") return targetBlock(params, target, kind);
 
-  if (target.status === "memory-blocked") {
-    return { result: memoryBlocked(pkg, target, dryRun, vulnerable) };
-  }
-
-  if (target.status === "no-safe-version") {
-    return {
-      result: {
-        packageName: pkg.name,
-        strategy: "none",
-        fromVersion: pkg.version,
-        applied: false,
-        dryRun,
-        unresolvedReason: "no-safe-version",
-        vulnerableRange: vulnerable.affected.vulnerableRange,
-        message: `No safe upgrade version found for ${pkg.name}.`,
-      },
-    };
-  }
-
-  if (target.status === "trust-blocked") {
-    return {
-      result: {
-        packageName: pkg.name,
-        strategy: "none",
-        fromVersion: pkg.version,
-        applied: false,
-        dryRun,
-        unresolvedReason: "policy-blocked",
-        vulnerableRange: vulnerable.affected.vulnerableRange,
-        message: `Supply chain trust gate blocked "${pkg.name}@${target.version}": ${target.reason}`,
-      },
-    };
-  }
-
-  const applyResult = await applyVersionBumpTool.execute({
-    cwd,
-    packageManager,
-    packageName: pkg.name,
-    fromVersion: pkg.version,
-    toVersion: target.version,
-    dryRun,
-    policy,
-    runTests,
-    typecheck: constraints.typecheck,
-    installMode: constraints.installMode,
-    installPreferOffline: constraints.installPreferOffline,
-    enforceFrozenLockfile: constraints.enforceFrozenLockfile,
-    workspace: constraints.workspace,
-    breakingChangeRefactor: constraints.enableBreakingChangeRefactor,
-    proofOfFix,
-    requireProofOfFix,
-    reproductionTest,
-    patchesDir,
-  });
-
+  const applied = transitive
+    ? await applyOverride(params, target.version)
+    : await applyBump(params, target.version);
   return {
     result: {
-      ...applyResult,
+      ...applied,
       vulnerableRange: vulnerable.affected.vulnerableRange,
-      message: `${applyResult.message}${describeSkipped(target.skipped)}`,
+      message: `${applied.message}${describeSkipped(target.skipped)}`,
     },
   };
 }
