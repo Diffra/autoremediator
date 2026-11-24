@@ -1,7 +1,6 @@
 /** Operations on an open attempt: apply a patch, verify the checkout, abandon it. */
 import { join } from "node:path";
 
-import { attemptVerifyRequest, defaultAttemptDeps } from "../repair/attempt.js";
 import { validateAndApplyPatch } from "../repair/patch-apply.js";
 import {
   type AttemptQuery,
@@ -15,6 +14,8 @@ import {
   planPackageManager,
   viewOf,
   withVerification,
+  attemptVerifyRequest,
+  defaultAttemptDeps,
 } from "./attempt-view.js";
 import { defaultRunDeps, type RunDeps } from "./deps.js";
 import { type AttemptRecord } from "./run-store.js";

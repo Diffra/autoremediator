@@ -1,8 +1,8 @@
 import type { AutonomySummary } from "../autonomy/types.js";
 import { resolveConstraints } from "../remediate/context.js";
 import type { RemediateOptions, RemediationReport } from "../remediate/types.js";
-import type { RepairAgent, RepairBudget } from "../repair/repair-agent.js";
 import type { CheckName, VerificationResult } from "../verify/types.js";
+import type { RepairAgent, RepairBudget } from "./apply-steps.js";
 import { fingerprintRepo } from "./fingerprint.js";
 import type { StepEvent } from "./ledger.js";
 import {

@@ -3,9 +3,7 @@ import { rmSync } from "node:fs";
 import { join } from "node:path";
 
 import { createProjectSnapshot } from "../../infra/rollback/rollback.js";
-import { memoryForHost } from "../memory/api.js";
 import type { RecipeEntry } from "../recipes/discover.js";
-import { attemptVerifyRequest, defaultAttemptDeps } from "../repair/attempt.js";
 import type { VerificationResult } from "../verify/types.js";
 import {
   type AttemptView,
@@ -16,6 +14,9 @@ import {
   type StartAttemptOptions,
   viewOf,
   withVerification,
+  attemptVerifyRequest,
+  defaultAttemptDeps,
+  memoryForHost,
 } from "./attempt-view.js";
 import { defaultRunDeps, type RunDeps } from "./deps.js";
 import { fingerprintRepo, sameInputs } from "./fingerprint.js";

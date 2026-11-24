@@ -1,6 +1,5 @@
 /** Puts an open attempt's change in the project, if it verifies, or reports why it did not. */
 import { assertAutonomyAllows } from "../autonomy/index.js";
-import { defaultAttemptDeps } from "../repair/attempt.js";
 import type { VerificationResult } from "../verify/types.js";
 import { verifyAttempt } from "./attempt-verify.js";
 import {
@@ -12,6 +11,7 @@ import {
   loadOpen,
   planPackageManager,
   viewOf,
+  defaultAttemptDeps,
 } from "./attempt-view.js";
 import { finalizeEvent, recordOutcomes } from "./autonomy-events.js";
 import { defaultRunDeps, type RunDeps } from "./deps.js";

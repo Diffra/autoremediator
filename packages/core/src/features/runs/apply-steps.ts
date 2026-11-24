@@ -7,7 +7,11 @@ import {
 import { errorMessage } from "../../shared/errors.js";
 import { resolveLanguageModel } from "../patch/model.js";
 import { createBuiltinRepairAgent } from "../repair/builtin-agent.js";
-import { DEFAULT_REPAIR_BUDGET, type RepairAgent } from "../repair/repair-agent.js";
+import {
+  DEFAULT_REPAIR_BUDGET,
+  type RepairAgent,
+  type RepairBudget,
+} from "../repair/repair-agent.js";
 import type { VerificationResult, VerifyRequest } from "../verify/types.js";
 import type { RunDeps } from "./deps.js";
 import { fingerprintRepo } from "./fingerprint.js";
@@ -16,6 +20,8 @@ import type { PlanItem, RemediationPlan } from "./plan.js";
 import { repairItem } from "./repair.js";
 import type { RunStore } from "./run-store.js";
 import { verifyOptionsOf } from "./verify-run.js";
+
+export type { RepairAgent, RepairBudget };
 
 /** Failures of the project's own checks after an upgrade: the ones an agent can do something about. */
 export const REPAIRABLE = new Set(["validation-failed", "breaking-change-unresolved"]);

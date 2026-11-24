@@ -8,11 +8,7 @@ import {
   readInstalledMaintainerVex,
   type MaintainerVexIndex,
 } from "../../maintainer-vex/index.js";
-import {
-  type loadMemoryConstraints,
-  pinnedMessage,
-  rejectedMessage,
-} from "../../memory/consume.js";
+import { type loadMemoryConstraints, pinnedMessage, rejectedMessage } from "../../memory/index.js";
 import type { PatchGenerator } from "../../patch/patch-generator.js";
 import { assessPackageReachability } from "../../reachability/check-reachability.js";
 import { computeEscalationAction } from "../escalation.js";

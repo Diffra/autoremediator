@@ -1,8 +1,7 @@
 import { loadPolicy } from "../../../infra/policy/policy.js";
 import { createProjectSnapshot } from "../../../infra/rollback/rollback.js";
 import type { CveDetails, VulnerablePackage } from "../../intelligence/types.js";
-import { loadMemoryConstraints } from "../../memory/consume.js";
-import type { PatchGenerator } from "../../patch/patch-generator.js";
+import { loadMemoryConstraints } from "../../memory/index.js";
 import { resolvePatchGenerator } from "../../patch/resolve.js";
 import { checkInventoryTool } from "../tools/check-inventory.js";
 import type {
@@ -160,7 +159,7 @@ function createRunContext(
   },
 ): PackageRunContext {
   const { options, resolved, signals } = run;
-  let generatorPromise: Promise<PatchGenerator | undefined> | undefined;
+  let generatorPromise: ReturnType<PackageRunContext["getGenerator"]> | undefined;
   return {
     cveId,
     cveDetails,

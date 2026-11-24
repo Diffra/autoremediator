@@ -7,6 +7,10 @@ import type { PlanItem, RemediationPlan } from "./plan.js";
 import { type AttemptRecord, type AttemptStatus, RunStore } from "./run-store.js";
 import { assertManagedWorktree } from "./worktree.js";
 
+// The one place the attempt operations reach into the repair and memory features.
+export { attemptVerifyRequest, defaultAttemptDeps } from "../repair/attempt.js";
+export { memoryForHost } from "../memory/api.js";
+
 export interface AttemptQuery {
   cwd?: string;
   runId: string;

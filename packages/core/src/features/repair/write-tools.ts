@@ -6,7 +6,7 @@ import { tool, type ToolSet } from "ai";
 import { z } from "zod";
 
 import { redactSecrets } from "../../shared/redact.js";
-import { MAX_PROPOSALS_PER_ATTEMPT, PROPOSAL_KINDS } from "../memory/propose.js";
+import { MAX_PROPOSALS_PER_ATTEMPT, PROPOSAL_KINDS } from "../memory/index.js";
 import { runCommandCheck, tail } from "../verify/command-check.js";
 import { refuse } from "./read-tools.js";
 import type { RepairToolContext } from "./tools.js";

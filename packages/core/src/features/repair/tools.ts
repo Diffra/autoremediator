@@ -1,6 +1,6 @@
 import type { ToolSet } from "ai";
 
-import type { MemoryProposal } from "../memory/propose.js";
+import type { MemoryProposal } from "../memory/index.js";
 import { createReadTools, hasNestedQuantifier } from "./read-tools.js";
 import type { RepairBudget, RepairCommands } from "./repair-agent.js";
 import type { ScopeGuard } from "./scope-guard.js";
