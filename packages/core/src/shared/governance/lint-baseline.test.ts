@@ -1,52 +1,39 @@
-import { existsSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { describe, expect, it } from "vitest";
 
 /**
- * The readability rules in `.oxlintrc.json` (file and function length)
- * are switched off for the files that predate them, listed in override blocks. That list is a
- * ratchet: it may only shrink. When you fix a file, delete its path there and lower the cap below.
+ * The file and function length rules in `.oxlintrc.json` apply to all production code. The only
+ * place they may be switched off is for test files, which are long by nature. A per-file list of
+ * exceptions would let new violations in, so none is allowed.
  */
 const root = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "..", "..");
-
-const CAPS: Record<string, number> = {
-  "eslint/max-lines": 14,
-  "eslint/max-lines-per-function": 15,
-};
+const SIZE_RULES = ["eslint/max-lines", "eslint/max-lines-per-function"];
+const TEST_FILE = /(?:\.test\.|\.spec\.|\/tests?\/|\/__tests__\/|\/testing\/)/;
 
 interface Override {
   files: string[];
   rules: Record<string, unknown>;
 }
 
-function baselines(): Map<string, string[]> {
+function overrides(): Override[] {
   const text = readFileSync(join(root, ".oxlintrc.json"), "utf8").replaceAll(/^\s*\/\/.*$/gm, "");
-  const { overrides } = JSON.parse(text) as { overrides: Override[] };
-  const found = new Map<string, string[]>();
-  for (const override of overrides) {
-    const rules = Object.keys(override.rules);
-    const [rule] = rules;
-    // A baseline block switches off exactly one ratcheted rule for a list of files.
-    if (rules.length === 1 && rule !== undefined && rule in CAPS) found.set(rule, override.files);
-  }
-  return found;
+  return (JSON.parse(text) as { overrides: Override[] }).overrides;
 }
 
-describe("readability lint baseline", () => {
-  const found = baselines();
-
-  it("has a baseline block for every ratcheted rule", () => {
-    expect([...found.keys()].toSorted()).toEqual(Object.keys(CAPS).toSorted());
+describe("size limits", () => {
+  it("are switched off only for test files", () => {
+    const offenders = overrides()
+      .filter((override) => SIZE_RULES.some((rule) => rule in override.rules))
+      .flatMap((override) => override.files)
+      .filter((pattern) => !TEST_FILE.test(pattern.replaceAll("**", "x").replace(/^\*/, "/")));
+    expect(offenders).toEqual([]);
   });
 
-  it.each(Object.entries(CAPS))("never grows the %s baseline beyond %i files", (rule, cap) => {
-    expect(found.get(rule)?.length ?? 0).toBeLessThanOrEqual(cap);
-  });
-
-  it("lists only files that still exist (delete a path when its file is moved or removed)", () => {
-    const missing = [...found.values()].flat().filter((path) => !existsSync(join(root, path)));
-    expect(missing).toEqual([]);
+  it("are enforced for production code", () => {
+    const text = readFileSync(join(root, ".oxlintrc.json"), "utf8");
+    for (const rule of SIZE_RULES) expect(text).toContain(`"${rule}": [`);
   });
 });

@@ -111,8 +111,9 @@ export function lineDiff(before: string, after: string): { added: string[]; remo
     else added.push(line);
   }
   const removed: string[] = [];
-  for (const [line, count] of counts)
+  for (const [line, count] of counts) {
     for (let index = 0; index < count; index++) removed.push(line);
+  }
   return { added, removed };
 }
 
