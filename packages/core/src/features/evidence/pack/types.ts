@@ -61,3 +61,6 @@ export interface EvidencePackResult {
   skippedRuns: Array<{ runId: string; reason: string }>;
   notes: string[];
 }
+
+/** The files a pack will hold, by relative path, before they are written and hashed. */
+export type PackContents = Map<string, { content: string; kind: EvidencePackFile["kind"] }>;
