@@ -14,7 +14,7 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.32.2",
-    "ai": "^7.0.172",
+    "ai": "^7.0.173",
     "autoremediator": "workspace:*",
     "semver": "^7.8.6",
     "zod": "^4.6.7"
