@@ -1,5 +1,12 @@
 import type { PackageManager } from "../../shared/types.js";
-import type { ItemOutcome } from "../runs/index.js";
+import type { applyPlan, ItemOutcome } from "../runs/index.js";
+
+/** Replaceable pieces, for tests. */
+export interface BisectDeps {
+  /** Environment for the package manager and the command (default: `process.env`). */
+  env?: NodeJS.ProcessEnv;
+  applyPlanFn?: typeof applyPlan;
+}
 
 export interface BisectOptions {
   /** Project directory (default: process.cwd()). A subdirectory of a git repository is fine. */
