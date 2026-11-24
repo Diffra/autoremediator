@@ -1,8 +1,8 @@
-import { fileAction } from "../../../shared/file-action.js";
 /** Plans, applies and formats the file changes `maintain` proposes: package.json, VEX, changeset. */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 
+import { fileAction } from "../../../shared/file-action.js";
 import { PACKAGE_VERSION } from "../../../shared/version.js";
 import { renderDiff } from "../../init/diff.js";
 import type { FileChange } from "../../init/types.js";
