@@ -100,8 +100,8 @@ export async function runTrace(options: TraceRunOptions): Promise<TraceRunResult
       timeoutMs: options.timeoutMs ?? 0,
       reject: false,
       stdin: "inherit",
-      stdout: output === "inherit" ? "inherit" : output === "stderr" ? process.stderr : "pipe",
-      stderr: output === "inherit" ? "inherit" : output === "stderr" ? process.stderr : "pipe",
+      stdout: stdioFor(output),
+      stderr: stdioFor(output),
     });
     if (result.exitCode === undefined && !result.signal && !result.timedOut) {
       throw new Error(`Could not run ${JSON.stringify(program)}: ${result.shortMessage}`, {
@@ -132,4 +132,11 @@ export async function runTrace(options: TraceRunOptions): Promise<TraceRunResult
   } finally {
     rmSync(scratch, { recursive: true, force: true });
   }
+}
+
+function stdioFor(output: string): "inherit" | "pipe" | NodeJS.WriteStream {
+  if (output === "inherit") {
+    return "inherit";
+  }
+  return output === "stderr" ? process.stderr : "pipe";
 }

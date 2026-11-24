@@ -5,7 +5,8 @@ import { UNRESOLVED_REASON_VALUES } from "../../infra/policy/schemas.js";
 import { AUTONOMY_DEFAULTS } from "../autonomy/types.js";
 import { DEFAULT_CONFIDENCE_THRESHOLDS } from "../patch/generate.js";
 import { computeDisposition } from "../remediate/local/disposition.js";
-import { findLoosenings, isLoosening, POLICY_KEY_COVERAGE } from "./policy-loosening.js";
+import { POLICY_KEY_COVERAGE } from "./policy-key-coverage.js";
+import { findLoosenings, isLoosening } from "./policy-loosening.js";
 
 const policy = (yaml: string) => loadPolicy(process.cwd(), `---\n${yaml}`);
 const keys = (before: string, after: string) =>

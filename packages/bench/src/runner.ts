@@ -146,9 +146,16 @@ export async function runMode(
   for (const task of tasks.filter((candidate) => appliesTo(candidate, modeName))) {
     const result = await runTask(task, modeName, env);
     env.log(
-      `  ${result.score === "PASS" ? "PASS" : "FAIL"}  ${task.id.padEnd(28)} ${result.outcome.padEnd(12)} ${(result.durationMs / 1000).toFixed(1)}s${result.control ? (result.controlCaught ? "  (control caught)" : "  (CONTROL NOT CAUGHT)") : ""}${result.error ? `\n        ${result.error.split("\n")[0]}` : ""}`,
+      `  ${result.score === "PASS" ? "PASS" : "FAIL"}  ${task.id.padEnd(28)} ${result.outcome.padEnd(12)} ${(result.durationMs / 1000).toFixed(1)}s${controlNote(result)}${result.error ? `\n        ${result.error.split("\n")[0]}` : ""}`,
     );
     results.push(result);
   }
   return results;
+}
+
+function controlNote(result: TaskResult): string {
+  if (!result.control) {
+    return "";
+  }
+  return result.controlCaught ? "  (control caught)" : "  (CONTROL NOT CAUGHT)";
 }

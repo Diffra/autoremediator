@@ -132,20 +132,7 @@ export function readPackageTarball(
   limits: TarballLimits = DEFAULT_TARBALL_LIMITS,
   options: ReadTarballOptions = {},
 ): PackageFiles {
-  let archive: Buffer;
-  try {
-    archive = gunzipSync(bytes, { maxOutputLength: limits.maxUnpackedBytes });
-  } catch (error) {
-    const tooLarge =
-      error instanceof RangeError ||
-      (error as NodeJS.ErrnoException | undefined)?.code === "ERR_BUFFER_TOO_LARGE";
-    throw new TarballError(
-      tooLarge
-        ? `Tarball expands beyond ${limits.maxUnpackedBytes} bytes (refusing a possible zip bomb)`
-        : "Tarball is not a valid gzip archive",
-      { cause: error },
-    );
-  }
+  const archive = gunzipArchive(bytes, limits);
 
   const files = new Map<string, string>();
   const docs = new Map<string, string>();
@@ -167,17 +154,8 @@ export function readPackageTarball(
     if (header.every((byte) => byte === 0)) break;
     verifyChecksum(header);
 
-    let size = readOctal(header, 124, 12, "size");
     const type = String.fromCodePoint(header[156] || 0x30);
-    // A pax `size` record overrides the header's for the entry it describes, as it does for npm's own
-    // extractor. Ignoring it would make this reader and npm disagree about where entries start, so a
-    // package could hide a file from the radar and the agent's view.
-    if (!["x", "g", "K", "L"].includes(type) && paxNext["size"] !== undefined) {
-      const declared = Number(paxNext["size"]);
-      if (!Number.isSafeInteger(declared) || declared < 0)
-        throw new TarballError("Tarball has an invalid pax size");
-      size = declared;
-    }
+    const size = entrySize(header, type, paxNext);
     const dataStart = offset + BLOCK;
     const dataEnd = dataStart + size;
     if (dataEnd > archive.length) throw new TarballError("Tarball is truncated");
@@ -198,25 +176,16 @@ export function readPackageTarball(
       throw new TarballError(`Tarball has more than ${limits.maxEntries} entries`);
     }
 
-    const prefix = readString(header, 345, 155);
-    const baseName = readString(header, 0, 100);
-    const rawPath = paxNext.path ?? longName ?? (prefix ? `${prefix}/${baseName}` : baseName);
+    const rawPath = rawEntryPath(header, paxNext, longName);
     paxNext = {};
     longName = undefined;
     // Validated for every entry type, so a hostile name is refused even on a link or directory.
     const path = normalizeEntryPath(rawPath);
 
-    if (type === "1" || type === "2") {
-      stats.skippedLinks++;
-      continue;
-    }
-    if (type === "5") continue;
-    if (type !== "0") {
-      stats.skippedOther++;
-      continue;
-    }
-    if (path === "") continue;
-    if (path.split("/").includes("node_modules")) continue;
+    const kind = classifyEntry(type, path);
+    if (kind === "link") stats.skippedLinks++;
+    if (kind === "other") stats.skippedOther++;
+    if (kind !== "file") continue;
 
     const isManifest = path === "package.json";
     if (options.includeDocs && DOC_PATTERN.test(path) && size <= MAX_DOC_BYTES) {
@@ -241,6 +210,57 @@ export function readPackageTarball(
   }
 
   if (manifestText === undefined) throw new TarballError("Tarball has no root package.json");
+  return {
+    files,
+    manifest: parseManifest(manifestText),
+    stats,
+    ...(options.includeDocs ? { docs } : {}),
+  };
+}
+
+function gunzipArchive(bytes: Uint8Array, limits: TarballLimits): Buffer {
+  try {
+    return gunzipSync(bytes, { maxOutputLength: limits.maxUnpackedBytes });
+  } catch (error) {
+    const tooLarge =
+      error instanceof RangeError ||
+      (error as NodeJS.ErrnoException | undefined)?.code === "ERR_BUFFER_TOO_LARGE";
+    throw new TarballError(
+      tooLarge
+        ? `Tarball expands beyond ${limits.maxUnpackedBytes} bytes (refusing a possible zip bomb)`
+        : "Tarball is not a valid gzip archive",
+      { cause: error },
+    );
+  }
+}
+
+/**
+ * The data size of an entry. A pax `size` record overrides the header's for the entry it describes,
+ * as it does for npm's own extractor. Ignoring it would make this reader and npm disagree about
+ * where entries start, so a package could hide a file from the radar and the agent's view.
+ */
+function entrySize(header: Buffer, type: string, paxNext: Record<string, string>): number {
+  const size = readOctal(header, 124, 12, "size");
+  if (["x", "g", "K", "L"].includes(type) || paxNext["size"] === undefined) {
+    return size;
+  }
+  const declared = Number(paxNext["size"]);
+  if (!Number.isSafeInteger(declared) || declared < 0) {
+    throw new TarballError("Tarball has an invalid pax size");
+  }
+  return declared;
+}
+
+/** What to do with an entry: read it as a file, count it as a link or odd type, or pass over it. */
+function classifyEntry(type: string, path: string): "file" | "link" | "other" | "ignore" {
+  if (type === "1" || type === "2") return "link";
+  if (type === "5") return "ignore";
+  if (type !== "0") return "other";
+  if (path === "" || path.split("/").includes("node_modules")) return "ignore";
+  return "file";
+}
+
+function parseManifest(manifestText: string): Record<string, unknown> {
   let manifest: unknown;
   try {
     manifest = JSON.parse(manifestText);
@@ -250,10 +270,16 @@ export function readPackageTarball(
   if (typeof manifest !== "object" || manifest === null || Array.isArray(manifest)) {
     throw new TarballError("Tarball package.json is not an object");
   }
-  return {
-    files,
-    manifest: manifest as Record<string, unknown>,
-    stats,
-    ...(options.includeDocs ? { docs } : {}),
-  };
+  return manifest as Record<string, unknown>;
+}
+
+/** The entry's name: a pax `path` record, then a GNU long name, then the ustar prefix and name. */
+function rawEntryPath(
+  header: Buffer,
+  paxNext: Record<string, string>,
+  longName: string | undefined,
+): string {
+  const prefix = readString(header, 345, 155);
+  const baseName = readString(header, 0, 100);
+  return paxNext.path ?? longName ?? (prefix ? `${prefix}/${baseName}` : baseName);
 }

@@ -41,322 +41,42 @@ async function runWithTimeout(task: unknown, timeoutMs: number): Promise<void> {
   ]);
 }
 
-export async function dispatchGitHubEvent(
-  context: WebhookContext,
-  payload: Record<string, unknown>,
-  options: DispatchOptions = {},
-): Promise<DispatchResult> {
-  if (context.eventName === "ping") {
-    return { status: "handled" };
-  }
+type TriggerEvent = RemediationTriggerContext["eventName"];
+type Payload = Record<string, unknown>;
 
-  if (context.eventName === "installation") {
-    const action = readAction(payload);
-    const installationId = readInstallationId(payload);
-    if (!action) {
-      return { status: "ignored", reason: "Missing installation action" };
-    }
+const NOT_ACTIVE = (installationId: number): DispatchResult => ({
+  status: "ignored",
+  reason: `Installation ${installationId} is not active`,
+});
 
-    if (!installationId) {
-      return { status: "ignored", reason: "Missing installation id" };
-    }
-
-    if (
-      ["created", "deleted", "suspend", "unsuspend", "new_permissions_accepted"].includes(action)
-    ) {
-      if (action === "created" || action === "unsuspend" || action === "new_permissions_accepted") {
-        options.stateStore?.markInstallationActive(installationId);
-      }
-
-      if (action === "deleted" || action === "suspend") {
-        options.stateStore?.markInstallationInactive(installationId);
-      }
-
-      return { status: "handled" };
-    }
-
-    return { status: "ignored", reason: `Unsupported installation action: ${action}` };
-  }
-
-  if (context.eventName === "installation_repositories") {
-    const action = readAction(payload);
-    const installationId = readInstallationId(payload);
-    if (!action) {
-      return { status: "ignored", reason: "Missing installation_repositories action" };
-    }
-
-    if (!installationId) {
-      return { status: "ignored", reason: "Missing installation id" };
-    }
-
-    if (options.stateStore && !options.stateStore.isInstallationActive(installationId)) {
-      return { status: "ignored", reason: `Installation ${installationId} is not active` };
-    }
-
-    if (["added", "removed"].includes(action)) {
-      return { status: "handled" };
-    }
-
-    return {
-      status: "ignored",
-      reason: `Unsupported installation_repositories action: ${action}`,
-    };
-  }
-
-  if (context.eventName === "check_suite") {
-    const action = readAction(payload);
-    if (action !== "requested" && action !== "rerequested") {
-      return {
-        status: "ignored",
-        reason: `check_suite action not triggerable: ${action ?? "unknown"}`,
-      };
-    }
-
-    const installationId = readInstallationId(payload);
-    if (
-      installationId &&
-      options.stateStore &&
-      !options.stateStore.isInstallationActive(installationId)
-    ) {
-      return { status: "ignored", reason: `Installation ${installationId} is not active` };
-    }
-
-    try {
-      const triggerTask = options.onRemediationRequested?.({
-        eventName: "check_suite",
-        installationId,
-        deliveryId: context.deliveryId,
-        payload,
-      });
-
-      if (options.remediationTriggerTimeoutMs !== undefined && triggerTask !== undefined) {
-        await runWithTimeout(triggerTask, options.remediationTriggerTimeoutMs);
-      } else {
-        await triggerTask;
-      }
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Unknown remediation trigger error";
-      return { status: "handled", reason: `Remediation trigger failed: ${message}` };
-    }
-
-    return { status: "handled" };
-  }
-
-  if (context.eventName === "push") {
-    const installationId = readInstallationId(payload);
-    if (
-      installationId &&
-      options.stateStore &&
-      !options.stateStore.isInstallationActive(installationId)
-    ) {
-      return { status: "ignored", reason: `Installation ${installationId} is not active` };
-    }
-
-    // Only trigger on pushes to the default branch
-    const ref = typeof payload.ref === "string" ? payload.ref : undefined;
-    const defaultBranch = (() => {
-      const repo = payload.repository;
-      if (repo && typeof repo === "object") {
-        const db = (repo as Record<string, unknown>).default_branch;
-        return typeof db === "string" ? db : undefined;
-      }
-      return undefined;
-    })();
-
-    if (!ref || !defaultBranch || ref !== `refs/heads/${defaultBranch}`) {
-      return { status: "ignored", reason: `push to non-default branch (${ref ?? "unknown"})` };
-    }
-
-    try {
-      const triggerTask = options.onRemediationRequested?.({
-        eventName: "push",
-        installationId,
-        deliveryId: context.deliveryId,
-        payload,
-      });
-
-      if (options.remediationTriggerTimeoutMs !== undefined && triggerTask !== undefined) {
-        await runWithTimeout(triggerTask, options.remediationTriggerTimeoutMs);
-      } else {
-        await triggerTask;
-      }
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Unknown remediation trigger error";
-      return { status: "handled", reason: `Remediation trigger failed: ${message}` };
-    }
-
-    return { status: "handled" };
-  }
-
-  if (context.eventName === "workflow_dispatch") {
-    const installationId = readInstallationId(payload);
-    if (
-      installationId &&
-      options.stateStore &&
-      !options.stateStore.isInstallationActive(installationId)
-    ) {
-      return { status: "ignored", reason: `Installation ${installationId} is not active` };
-    }
-
-    try {
-      const triggerTask = options.onRemediationRequested?.({
-        eventName: "workflow_dispatch",
-        installationId,
-        deliveryId: context.deliveryId,
-        payload,
-      });
-
-      if (options.remediationTriggerTimeoutMs !== undefined && triggerTask !== undefined) {
-        await runWithTimeout(triggerTask, options.remediationTriggerTimeoutMs);
-      } else {
-        await triggerTask;
-      }
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Unknown remediation trigger error";
-      return { status: "handled", reason: `Remediation trigger failed: ${message}` };
-    }
-
-    return { status: "handled" };
-  }
-
-  if (context.eventName === "check_run") {
-    const action = readAction(payload);
-    if (action !== "completed") {
-      return {
-        status: "ignored",
-        reason: `check_run action not completed: ${action ?? "unknown"}`,
-      };
-    }
-
-    const checkRun = payload.check_run as Record<string, unknown> | undefined;
-    const conclusion = checkRun?.conclusion as string | undefined;
-    if (conclusion !== "failure") {
-      return {
-        status: "ignored",
-        reason: `check_run conclusion not failure: ${conclusion ?? "unknown"}`,
-      };
-    }
-
-    const pullRequests =
-      (checkRun?.pull_requests as Array<Record<string, unknown>> | undefined) ?? [];
-    const isAutoremediatorPr = pullRequests.some((pr) => {
-      const head = pr.head as Record<string, unknown> | undefined;
-      const ref = typeof head?.ref === "string" ? head.ref : "";
-      return ref.startsWith("autoremediator/") || ref.includes("autoremediator");
-    });
-    // Dependabot and Renovate branches go to the bot PR doctor, which the repository must enable.
-    // A pull request from a fork is dropped here already; the handler checks the rest.
-    const isBotPr = pullRequests.some((pr) => {
-      const head = pr.head as Record<string, unknown> | undefined;
-      const ref = typeof head?.ref === "string" ? head.ref : "";
-      return botKindOfBranch(ref) !== undefined && !isForkPullRequest(pr);
-    });
-
-    if (!isAutoremediatorPr && !isBotPr && pullRequests.length > 0) {
-      const onlyForkedBot = pullRequests.every((pr) => {
-        const head = pr.head as Record<string, unknown> | undefined;
-        const ref = typeof head?.ref === "string" ? head.ref : "";
-        return botKindOfBranch(ref) !== undefined && isForkPullRequest(pr);
-      });
-      return {
-        status: "ignored",
-        reason: onlyForkedBot
-          ? "check_run failure on a bot pull request from a fork"
-          : "check_run failure not on an autoremediator pull request branch",
-      };
-    }
-
-    const installationId = readInstallationId(payload);
-    if (
-      installationId &&
-      options.stateStore &&
-      !options.stateStore.isInstallationActive(installationId)
-    ) {
-      return { status: "ignored", reason: `Installation ${installationId} is not active` };
-    }
-
-    try {
-      const triggerTask = options.onRemediationRequested?.({
-        eventName: "check_run",
-        installationId,
-        deliveryId: context.deliveryId,
-        payload,
-      });
-
-      if (options.remediationTriggerTimeoutMs !== undefined && triggerTask !== undefined) {
-        await runWithTimeout(triggerTask, options.remediationTriggerTimeoutMs);
-      } else {
-        await triggerTask;
-      }
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Unknown remediation trigger error";
-      return { status: "handled", reason: `Remediation trigger failed: ${message}` };
-    }
-
-    return { status: "handled" };
-  }
-
-  if (context.eventName === "issue_comment") {
-    if (readAction(payload) !== "created") {
-      return { status: "ignored", reason: "issue_comment action is not created" };
-    }
-    const comment = payload.comment as Record<string, unknown> | undefined;
-    const user = comment?.user as Record<string, unknown> | undefined;
-    const login = typeof user?.login === "string" ? user.login : "";
-    // Never react to bots (including this app's own replies, which mention the commands).
-    if (user?.type === "Bot" || login.endsWith("[bot]")) {
-      return { status: "ignored", reason: "comment written by a bot" };
-    }
-    const body = typeof comment?.body === "string" ? comment.body : "";
-    if (!parseComment(body)) {
-      return { status: "ignored", reason: "comment has no autoremediator command" };
-    }
-    return triggerRemediation(context, payload, options, "issue_comment");
-  }
-
-  if (context.eventName === "dependabot_alert" || context.eventName === "code_scanning_alert") {
-    const action = readAction(payload);
-    if (action !== "created" && action !== "reopened") {
-      return {
-        status: "ignored",
-        reason: `${context.eventName} action not triggerable: ${action ?? "unknown"}`,
-      };
-    }
-    const target =
-      context.eventName === "dependabot_alert"
-        ? dependabotAlertTarget(payload)
-        : codeScanningAlertTarget(payload);
-    if (!target) {
-      return {
-        status: "ignored",
-        reason: `${context.eventName} does not name a CVE or GHSA advisory`,
-      };
-    }
-    return triggerRemediation(context, payload, options, context.eventName);
-  }
-
-  void payload;
-  return { status: "ignored", reason: `Unhandled event type: ${context.eventName}` };
-}
-
-async function triggerRemediation(
-  context: WebhookContext,
-  payload: Record<string, unknown>,
+/** The ignored result for an installation the app has marked inactive, if it is one. */
+function inactiveInstallation(
+  payload: Payload,
   options: DispatchOptions,
-  eventName: "issue_comment" | "dependabot_alert" | "code_scanning_alert",
-): Promise<DispatchResult> {
+): DispatchResult | undefined {
   const installationId = readInstallationId(payload);
   if (
     installationId &&
     options.stateStore &&
     !options.stateStore.isInstallationActive(installationId)
   ) {
-    return { status: "ignored", reason: `Installation ${installationId} is not active` };
+    return NOT_ACTIVE(installationId);
   }
+  return undefined;
+}
+
+async function triggerRemediation(
+  context: WebhookContext,
+  payload: Payload,
+  options: DispatchOptions,
+  eventName: TriggerEvent,
+): Promise<DispatchResult> {
+  const inactive = inactiveInstallation(payload, options);
+  if (inactive) return inactive;
   try {
     const triggerTask = options.onRemediationRequested?.({
       eventName,
-      installationId,
+      installationId: readInstallationId(payload),
       deliveryId: context.deliveryId,
       payload,
     });
@@ -370,4 +90,176 @@ async function triggerRemediation(
     return { status: "handled", reason: `Remediation trigger failed: ${message}` };
   }
   return { status: "handled" };
+}
+
+type Handler = (
+  context: WebhookContext,
+  payload: Payload,
+  options: DispatchOptions,
+) => DispatchResult | Promise<DispatchResult>;
+
+/** Install, uninstall, suspend and permission changes keep the app's own record of installations. */
+const handleInstallation: Handler = (_context, payload, options) => {
+  const action = readAction(payload);
+  const installationId = readInstallationId(payload);
+  if (!action) return { status: "ignored", reason: "Missing installation action" };
+  if (!installationId) return { status: "ignored", reason: "Missing installation id" };
+
+  if (action === "created" || action === "unsuspend" || action === "new_permissions_accepted") {
+    options.stateStore?.markInstallationActive(installationId);
+    return { status: "handled" };
+  }
+  if (action === "deleted" || action === "suspend") {
+    options.stateStore?.markInstallationInactive(installationId);
+    return { status: "handled" };
+  }
+  return { status: "ignored", reason: `Unsupported installation action: ${action}` };
+};
+
+const handleInstallationRepositories: Handler = (_context, payload, options) => {
+  const action = readAction(payload);
+  const installationId = readInstallationId(payload);
+  if (!action) return { status: "ignored", reason: "Missing installation_repositories action" };
+  if (!installationId) return { status: "ignored", reason: "Missing installation id" };
+  const inactive = inactiveInstallation(payload, options);
+  if (inactive) return inactive;
+  if (action === "added" || action === "removed") return { status: "handled" };
+  return { status: "ignored", reason: `Unsupported installation_repositories action: ${action}` };
+};
+
+const handleCheckSuite: Handler = (context, payload, options) => {
+  const action = readAction(payload);
+  if (action !== "requested" && action !== "rerequested") {
+    return {
+      status: "ignored",
+      reason: `check_suite action not triggerable: ${action ?? "unknown"}`,
+    };
+  }
+  return triggerRemediation(context, payload, options, "check_suite");
+};
+
+/** Only pushes to the default branch trigger a run. */
+const handlePush: Handler = (context, payload, options) => {
+  const inactive = inactiveInstallation(payload, options);
+  if (inactive) return inactive;
+  const ref = typeof payload.ref === "string" ? payload.ref : undefined;
+  const repo = payload.repository;
+  const branch =
+    repo && typeof repo === "object" ? (repo as Record<string, unknown>).default_branch : undefined;
+  const defaultBranch = typeof branch === "string" ? branch : undefined;
+  if (!ref || !defaultBranch || ref !== `refs/heads/${defaultBranch}`) {
+    return { status: "ignored", reason: `push to non-default branch (${ref ?? "unknown"})` };
+  }
+  return triggerRemediation(context, payload, options, "push");
+};
+
+const handleWorkflowDispatch: Handler = (context, payload, options) =>
+  triggerRemediation(context, payload, options, "workflow_dispatch");
+
+type PullRequestSummary = Record<string, unknown>;
+
+const headRefOf = (pr: PullRequestSummary): string => {
+  const head = pr.head as Record<string, unknown> | undefined;
+  return typeof head?.ref === "string" ? head.ref : "";
+};
+
+/** Why a failed check run is not ours to act on, or undefined when it is. */
+function checkRunIgnoredReason(pullRequests: PullRequestSummary[]): string | undefined {
+  if (pullRequests.length === 0) return undefined;
+  const isAutoremediatorPr = pullRequests.some((pr) => headRefOf(pr).includes("autoremediator"));
+  // Dependabot and Renovate branches go to the bot PR doctor, which the repository must enable.
+  // A pull request from a fork is dropped here already; the handler checks the rest.
+  const isBotPr = pullRequests.some(
+    (pr) => botKindOfBranch(headRefOf(pr)) !== undefined && !isForkPullRequest(pr),
+  );
+  if (isAutoremediatorPr || isBotPr) return undefined;
+  const onlyForkedBot = pullRequests.every(
+    (pr) => botKindOfBranch(headRefOf(pr)) !== undefined && isForkPullRequest(pr),
+  );
+  return onlyForkedBot
+    ? "check_run failure on a bot pull request from a fork"
+    : "check_run failure not on an autoremediator pull request branch";
+}
+
+const handleCheckRun: Handler = (context, payload, options) => {
+  const action = readAction(payload);
+  if (action !== "completed") {
+    return { status: "ignored", reason: `check_run action not completed: ${action ?? "unknown"}` };
+  }
+  const checkRun = payload.check_run as Record<string, unknown> | undefined;
+  const conclusion = checkRun?.conclusion as string | undefined;
+  if (conclusion !== "failure") {
+    return {
+      status: "ignored",
+      reason: `check_run conclusion not failure: ${conclusion ?? "unknown"}`,
+    };
+  }
+  const pullRequests = (checkRun?.pull_requests as PullRequestSummary[] | undefined) ?? [];
+  const reason = checkRunIgnoredReason(pullRequests);
+  if (reason) return { status: "ignored", reason };
+  return triggerRemediation(context, payload, options, "check_run");
+};
+
+const handleIssueComment: Handler = (context, payload, options) => {
+  if (readAction(payload) !== "created") {
+    return { status: "ignored", reason: "issue_comment action is not created" };
+  }
+  const comment = payload.comment as Record<string, unknown> | undefined;
+  const user = comment?.user as Record<string, unknown> | undefined;
+  const login = typeof user?.login === "string" ? user.login : "";
+  // Never react to bots (including this app's own replies, which mention the commands).
+  if (user?.type === "Bot" || login.endsWith("[bot]")) {
+    return { status: "ignored", reason: "comment written by a bot" };
+  }
+  const body = typeof comment?.body === "string" ? comment.body : "";
+  if (!parseComment(body)) {
+    return { status: "ignored", reason: "comment has no autoremediator command" };
+  }
+  return triggerRemediation(context, payload, options, "issue_comment");
+};
+
+const handleAlert: Handler = (context, payload, options) => {
+  const eventName = context.eventName as "dependabot_alert" | "code_scanning_alert";
+  const action = readAction(payload);
+  if (action !== "created" && action !== "reopened") {
+    return {
+      status: "ignored",
+      reason: `${eventName} action not triggerable: ${action ?? "unknown"}`,
+    };
+  }
+  const target =
+    eventName === "dependabot_alert"
+      ? dependabotAlertTarget(payload)
+      : codeScanningAlertTarget(payload);
+  if (!target) {
+    return { status: "ignored", reason: `${eventName} does not name a CVE or GHSA advisory` };
+  }
+  return triggerRemediation(context, payload, options, eventName);
+};
+
+const HANDLERS: Record<string, Handler> = {
+  ping: () => ({ status: "handled" }),
+  installation: handleInstallation,
+  installation_repositories: handleInstallationRepositories,
+  check_suite: handleCheckSuite,
+  push: handlePush,
+  workflow_dispatch: handleWorkflowDispatch,
+  check_run: handleCheckRun,
+  issue_comment: handleIssueComment,
+  dependabot_alert: handleAlert,
+  code_scanning_alert: handleAlert,
+};
+
+export async function dispatchGitHubEvent(
+  context: WebhookContext,
+  payload: Payload,
+  options: DispatchOptions = {},
+): Promise<DispatchResult> {
+  const handler = Object.hasOwn(HANDLERS, context.eventName)
+    ? HANDLERS[context.eventName]
+    : undefined;
+  if (!handler) {
+    return { status: "ignored", reason: `Unhandled event type: ${context.eventName}` };
+  }
+  return handler(context, payload, options);
 }

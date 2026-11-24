@@ -65,8 +65,9 @@ function describePack(result: EvidencePackResult): string {
 }
 
 export async function runEvidencePack(opts: EvidencePackCliOptions): Promise<void> {
-  if (!opts.out)
+  if (!opts.out) {
     throw new Error("--out <dir> is required: the directory to write the evidence pack into.");
+  }
   const result = await buildEvidencePack({
     outDir: opts.out,
     cwd: opts.cwd,
@@ -92,11 +93,7 @@ function describeVerification(check: EvidencePackVerification): string {
   const lines = [
     check.ok ? "OK: every file matches the manifest." : "FAILED:",
     ...check.problems.map((problem) => `  ${problem}`),
-    check.signaturesVerified
-      ? "  signatures verified against the key you gave"
-      : check.signed
-        ? "  signatures NOT checked"
-        : "  attestations are unsigned",
+    signatureLine(check),
     ...check.notes.map((note) => `  note: ${note}`),
   ];
   return `${lines.join("\n")}\n`;
@@ -168,4 +165,11 @@ export function registerEvidencePackCommands(program: Command): void {
       else process.stdout.write(describeVerification(check));
       process.exitCode = check.ok ? 0 : 1;
     });
+}
+
+function signatureLine(check: { signaturesVerified: boolean; signed: boolean }): string {
+  if (check.signaturesVerified) {
+    return "  signatures verified against the key you gave";
+  }
+  return check.signed ? "  signatures NOT checked" : "  attestations are unsigned";
 }

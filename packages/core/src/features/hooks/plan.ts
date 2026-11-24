@@ -199,12 +199,7 @@ function planScriptFiles(input: PlanInput, directory: string, strictExec: boolea
       needsChmod: !uninstall && notExecutable && state === "installed",
     });
     changes.push(change);
-    const effective: HookState =
-      change.action === "conflict"
-        ? "conflict"
-        : state === "installed" && notExecutable
-          ? "modified"
-          : state;
+    const effective = effectiveState(change.action === "conflict", state, notExecutable);
     statuses.push({
       hook,
       state: effective,
@@ -357,4 +352,11 @@ export function planHooks(input: PlanInput): HooksPlan {
     context.hooksDir,
     planScriptFiles(input, context.hooksDir, true),
   );
+}
+
+function effectiveState(conflict: boolean, state: HookState, notExecutable: boolean): HookState {
+  if (conflict) {
+    return "conflict";
+  }
+  return state === "installed" && notExecutable ? "modified" : state;
 }

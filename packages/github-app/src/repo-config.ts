@@ -76,8 +76,9 @@ function sanitizeRaw(raw: Record<string, unknown>): RawRepoConfig {
   if (raw.dispositionPolicy !== null && typeof raw.dispositionPolicy === "object") {
     out.dispositionPolicy = raw.dispositionPolicy as RawRepoConfig["dispositionPolicy"];
   }
-  if (typeof raw.enablePrAutoHealing === "boolean")
+  if (typeof raw.enablePrAutoHealing === "boolean") {
     out.enablePrAutoHealing = raw.enablePrAutoHealing;
+  }
   if (
     typeof raw.maxHealingAttempts === "number" &&
     Number.isInteger(raw.maxHealingAttempts) &&

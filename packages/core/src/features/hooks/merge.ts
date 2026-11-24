@@ -169,8 +169,9 @@ function findLefthookEntry(
   if (isSeq(jobs)) {
     const index = jobs.items.findIndex((job) => isMap(job) && job.get("name") === LEFTHOOK_NAME);
     const job = index === -1 ? undefined : jobs.items[index];
-    if (index !== -1)
+    if (index !== -1) {
       return { kind: "job", run: isMap(job) ? runText(job.get("run", true)) : undefined, index };
+    }
   }
   return undefined;
 }

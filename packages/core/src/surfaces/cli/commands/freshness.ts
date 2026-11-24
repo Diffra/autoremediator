@@ -109,8 +109,9 @@ export function renderFreshnessReport(report: FreshnessReport): string {
     );
     for (const climb of report.climbs) lines.push(climbLine(climb));
   }
-  for (const entry of report.unplanned)
+  for (const entry of report.unplanned) {
     lines.push("", `Not planned: ${entry.packageName}: ${entry.reason}`);
+  }
   for (const note of report.notes) lines.push("", `Note: ${note}`);
   return `${lines.join("\n")}\n`;
 }
@@ -166,8 +167,9 @@ function renderApply(result: ApplyFreshnessResult): string {
       );
     }
   }
-  for (const entry of result.stopped)
+  for (const entry of result.stopped) {
     lines.push(`  stopped: ${entry.packageName}: ${brief(entry.reason, 1)}`);
+  }
   if (result.remaining.length > 0) lines.push(`  still to do: ${result.remaining.join(", ")}`);
   return `${lines.join("\n")}\n`;
 }
@@ -294,46 +296,50 @@ export function registerFreshnessCommands(program: Command): void {
     )
     .option("--output-format <format>", "Output format: text|json", "text")
     .action(async (opts: FreshnessCliOptions) => {
-      validateOutputFormat(opts.outputFormat as "text" | "json", ["text", "json"], "freshness");
-      if (opts.apply && opts.plan) throw new Error("Use --plan or --apply, not both.");
-      if (!opts.apply && !opts.plan) {
-        const misplaced = [
-          opts.maxSteps ? "--max-steps" : "",
-          opts.runTests ? "--run-tests" : "",
-          opts.typecheck ? "--typecheck" : "",
-          opts.model ? "--model" : "",
-          opts.createChangeRequest ? "--create-change-request" : "",
-        ].filter(Boolean);
-        if (misplaced.length > 0)
-          throw new Error(`${misplaced.join(", ")} only apply with --plan or --apply.`);
-      }
-      if (opts.apply && opts.assess === false) {
-        throw new Error(
-          "--no-assess only applies with --plan: --apply orders and holds steps by their rating.",
-        );
-      }
-      if (
-        !opts.createChangeRequest &&
-        (opts.changeRequestProvider ||
-          opts.changeRequestRepository ||
-          opts.changeRequestBaseBranch ||
-          opts.changeRequestBranchPrefix)
-      ) {
-        throw new Error("change-request override flags require --create-change-request.");
-      }
-      if (
-        opts.changeRequestProvider &&
-        !CHANGE_REQUEST_PROVIDER_VALUES.includes(
-          opts.changeRequestProvider as ChangeRequestProvider,
-        )
-      ) {
-        throw new Error(
-          `--change-request-provider must be one of: ${CHANGE_REQUEST_PROVIDER_VALUES.join(", ")} (received: ${opts.changeRequestProvider}).`,
-        );
-      }
-      if (opts.maxSteps !== undefined && (!Number.isInteger(opts.maxSteps) || opts.maxSteps < 1)) {
-        throw new Error("--max-steps must be a whole number of at least 1.");
-      }
+      validateFreshnessOptions(opts);
       await runFreshness(opts);
     });
+}
+
+/** Rejects option combinations that make no sense before any work starts. */
+function validateFreshnessOptions(opts: FreshnessCliOptions): void {
+  validateOutputFormat(opts.outputFormat as "text" | "json", ["text", "json"], "freshness");
+  if (opts.apply && opts.plan) throw new Error("Use --plan or --apply, not both.");
+  if (!opts.apply && !opts.plan) {
+    const misplaced = [
+      opts.maxSteps ? "--max-steps" : "",
+      opts.runTests ? "--run-tests" : "",
+      opts.typecheck ? "--typecheck" : "",
+      opts.model ? "--model" : "",
+      opts.createChangeRequest ? "--create-change-request" : "",
+    ].filter(Boolean);
+    if (misplaced.length > 0) {
+      throw new Error(`${misplaced.join(", ")} only apply with --plan or --apply.`);
+    }
+  }
+  if (opts.apply && opts.assess === false) {
+    throw new Error(
+      "--no-assess only applies with --plan: --apply orders and holds steps by their rating.",
+    );
+  }
+  if (
+    !opts.createChangeRequest &&
+    (opts.changeRequestProvider ||
+      opts.changeRequestRepository ||
+      opts.changeRequestBaseBranch ||
+      opts.changeRequestBranchPrefix)
+  ) {
+    throw new Error("change-request override flags require --create-change-request.");
+  }
+  if (
+    opts.changeRequestProvider &&
+    !CHANGE_REQUEST_PROVIDER_VALUES.includes(opts.changeRequestProvider as ChangeRequestProvider)
+  ) {
+    throw new Error(
+      `--change-request-provider must be one of: ${CHANGE_REQUEST_PROVIDER_VALUES.join(", ")} (received: ${opts.changeRequestProvider}).`,
+    );
+  }
+  if (opts.maxSteps !== undefined && (!Number.isInteger(opts.maxSteps) || opts.maxSteps < 1)) {
+    throw new Error("--max-steps must be a whole number of at least 1.");
+  }
 }

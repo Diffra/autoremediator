@@ -56,12 +56,12 @@ function findUp(file: string, cwd: string): string | undefined {
 
 /** A non-negative finite number from a config value; anything else is "not set". */
 function toNumber(value: unknown): number | undefined {
-  const parsed =
-    typeof value === "number"
-      ? value
-      : typeof value === "string"
-        ? Number(value.trim())
-        : Number.NaN;
+  let parsed = Number.NaN;
+  if (typeof value === "number") {
+    parsed = value;
+  } else if (typeof value === "string") {
+    parsed = Number(value.trim());
+  }
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : undefined;
 }
 

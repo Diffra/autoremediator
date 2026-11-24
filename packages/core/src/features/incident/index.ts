@@ -16,6 +16,7 @@ import type {
   Exposure,
   IncidentOptions,
   IncidentReport,
+  IncidentTarget,
   PackageExposure,
   Rollback,
 } from "./types.js";
@@ -95,6 +96,63 @@ export async function incident(
   const notes: string[] = [];
 
   // 1. Exposure now, from the lockfiles.
+  const exposure = await assessExposure(cwd, target, deps, notes);
+
+  // 2. History.
+  let history: HistoryReport | undefined;
+  if (options.history !== false) {
+    history = await scanHistory({
+      cwd,
+      targets: target.affected.map((affected) => ({ name: affected.name, range: affected.range })),
+      ...(options.maxCommits ? { maxCommits: options.maxCommits } : {}),
+    });
+  }
+
+  // 3. Roll back to the last safe version.
+  const rollback = await planRollback({ cwd, input, options, deps, target, exposure, history });
+
+  // 4. What an install while it was here could have reached.
+  const everPresent = history?.packages.some((entry) => entry.windows.length > 0) ?? false;
+  const secrets = exposure.exposed || everPresent ? scanSecrets(cwd) : undefined;
+
+  const report: IncidentReport = {
+    schemaVersion: "1.0",
+    generatedAt: new Date(deps.now()).toISOString(),
+    cwd,
+    target,
+    exposure,
+    ...(history ? { history } : {}),
+    rollback,
+    ...(secrets ? { secrets } : {}),
+    notes,
+  };
+
+  if (options.outputDir) {
+    const dir = resolve(options.outputDir);
+    mkdirSync(dir, { recursive: true });
+    const markdown = join(dir, "incident-report.md");
+    const json = join(dir, "incident-report.json");
+    // The report records where its own files are, so the JSON is written with that already set.
+    report.files = { markdown, json };
+    writeFileSync(markdown, renderIncidentMarkdown(report), "utf8");
+    writeFileSync(json, `${JSON.stringify(report, null, 2)}\n`, "utf8");
+  }
+  return report;
+}
+
+/** Exit code for scripts: 0 clear, 3 not locked now but it was in history, 4 locked or installed now. */
+export function incidentExitCode(report: IncidentReport): number {
+  if (report.exposure.exposed) return 4;
+  return report.history?.packages.some((entry) => entry.windows.length > 0) ? 3 : 0;
+}
+
+/** Which affected versions the lockfiles lock and node_modules holds now. */
+async function assessExposure(
+  cwd: string,
+  target: IncidentTarget,
+  deps: IncidentDeps,
+  notes: string[],
+): Promise<Exposure> {
   const { manifest, locks, notes: lockNotes } = loadProjectLocks(cwd);
   const packages: PackageExposure[] = target.affected.map((affected) => ({
     packageName: affected.name,
@@ -113,8 +171,9 @@ export async function incident(
       for (const entry of packages) {
         const range = inRange(entry.packageName, entry.range);
         const copies = installed.filter((copy) => range(copy.name, copy.version));
-        if (copies.length > 0)
+        if (copies.length > 0) {
           entry.installed = copies.map((copy) => ({ version: copy.version, type: copy.type }));
+        }
       }
     } catch {
       notes.push(
@@ -122,7 +181,7 @@ export async function incident(
       );
     }
   }
-  const exposure: Exposure = {
+  return {
     exposed: packages.some(
       (entry) => entry.occurrences.length > 0 || (entry.installed?.length ?? 0) > 0,
     ),
@@ -130,18 +189,22 @@ export async function incident(
     packages,
     notes: lockNotes,
   };
+}
 
-  // 2. History.
-  let history: HistoryReport | undefined;
-  if (options.history !== false) {
-    history = await scanHistory({
-      cwd,
-      targets: target.affected.map((affected) => ({ name: affected.name, range: affected.range })),
-      ...(options.maxCommits ? { maxCommits: options.maxCommits } : {}),
-    });
-  }
+interface RollbackInput {
+  cwd: string;
+  input: string;
+  options: IncidentOptions;
+  deps: IncidentDeps;
+  target: IncidentTarget;
+  exposure: Exposure;
+  history: HistoryReport | undefined;
+}
 
-  // 3. Roll back to the last safe version.
+/** The versions to go back to, from the registry and the project's own history; recorded as a plan on request. */
+async function planRollback(input: RollbackInput): Promise<Rollback> {
+  const { cwd, options, deps, target, exposure, history } = input;
+  const { packages } = exposure;
   const published = new Map<string, string[] | undefined>();
   const rollbackNotes: string[] = [];
   if (exposure.exposed && !options.offline) {
@@ -186,7 +249,7 @@ export async function incident(
         summary: `Incident rollback for ${target.input}: ${proposals.filter((proposal) => proposal.toVersion).length} of ${proposals.length} affected copies have a version to go back to.`,
         advisorySummary:
           target.advisory?.summary ??
-          `Versions of ${target.affected.map((entry) => entry.name).join(", ")} reported compromised: ${input}`,
+          `Versions of ${target.affected.map((entry) => entry.name).join(", ")} reported compromised: ${input.input}`,
         affected: target.affected.map((entry) => ({
           name: entry.name,
           range: entry.range,
@@ -208,38 +271,5 @@ export async function incident(
       rollback.notes.push("No plan was recorded: there is no version to go back to.");
     }
   }
-
-  // 4. What an install while it was here could have reached.
-  const everPresent = history?.packages.some((entry) => entry.windows.length > 0) ?? false;
-  const secrets = exposure.exposed || everPresent ? scanSecrets(cwd) : undefined;
-
-  const report: IncidentReport = {
-    schemaVersion: "1.0",
-    generatedAt: new Date(deps.now()).toISOString(),
-    cwd,
-    target,
-    exposure,
-    ...(history ? { history } : {}),
-    rollback,
-    ...(secrets ? { secrets } : {}),
-    notes,
-  };
-
-  if (options.outputDir) {
-    const dir = resolve(options.outputDir);
-    mkdirSync(dir, { recursive: true });
-    const markdown = join(dir, "incident-report.md");
-    const json = join(dir, "incident-report.json");
-    // The report records where its own files are, so the JSON is written with that already set.
-    report.files = { markdown, json };
-    writeFileSync(markdown, renderIncidentMarkdown(report), "utf8");
-    writeFileSync(json, `${JSON.stringify(report, null, 2)}\n`, "utf8");
-  }
-  return report;
-}
-
-/** Exit code for scripts: 0 clear, 3 not locked now but it was in history, 4 locked or installed now. */
-export function incidentExitCode(report: IncidentReport): number {
-  if (report.exposure.exposed) return 4;
-  return report.history?.packages.some((entry) => entry.windows.length > 0) ? 3 : 0;
+  return rollback;
 }

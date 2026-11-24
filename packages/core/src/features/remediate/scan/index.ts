@@ -17,13 +17,10 @@ import {
   resolveProvenanceContext,
 } from "../context.js";
 import type { ScanOptions, ScanReport } from "../contracts.js";
-import {
-  assertValidSimulationMode,
-  buildEscalationCounts,
-  buildSlaBreachSummary,
-} from "../reporting.js";
+import { buildEscalationCounts, buildSlaBreachSummary } from "../reporting.js";
 import { executeScanRemediations } from "../scan-execution.js";
 import { buildScanOutcome } from "../scan-outcome.js";
+import { assertValidSimulationMode } from "../simulation.js";
 import type { RemediationReport } from "../types.js";
 import { aggregateScanLlmUsage } from "./report-metrics.js";
 
@@ -56,14 +53,7 @@ export async function remediateFromScan(
   const audit = options.audit ?? false;
   const workspace = options.constraints?.workspace ?? policy.constraints?.workspace;
 
-  const findings = audit
-    ? await parseScanInputFromAudit({
-        cwd,
-        packageManager: options.packageManager,
-        format,
-        workspace,
-      })
-    : parseScanInput(inputPath, format);
+  const findings = await readFindings({ inputPath, options, cwd, format, audit, workspace });
   const cveIds = uniqueCveIds(findings);
   const model = getModelSpec(options.model);
   const correlation = resolveCorrelationContext(options);
@@ -94,28 +84,58 @@ export async function remediateFromScan(
     constraints,
     evidence,
   });
-  const reports: RemediationReport[] = execution.reports;
-  const { errors, patchCount, patchValidationFailures } = execution;
-  const containmentCount = countContainedResults(reports);
-  const escalationCounts = buildEscalationCounts(reports.flatMap((report) => report.results));
+  return finishScan({
+    cwd,
+    options,
+    cveIds,
+    patchesDir,
+    execution,
+    evidence,
+    correlation,
+    provenance,
+    constraints,
+  });
+}
 
-  const llmUsageTotals = aggregateScanLlmUsage(reports);
-  const outcome = buildScanOutcome({ reports, errors });
-  const {
-    status,
-    successCount,
-    failedCount,
-    strategyCounts,
-    dependencyScopeCounts,
-    unresolvedByReason,
-    dispositionCounts,
-    simulationSummary,
-    remediationCount,
-  } = outcome;
+interface ReadFindingsInput {
+  inputPath: string;
+  options: ScanOptions;
+  cwd: string;
+  format: NonNullable<ScanOptions["format"]>;
+  audit: boolean;
+  workspace: string | undefined;
+}
 
-  evidence.summary = {
+/** The findings of a scanner file, or of the project's own audit command with `audit`. */
+function readFindings(input: ReadFindingsInput) {
+  const { inputPath, options, cwd, format, audit, workspace } = input;
+  return audit
+    ? parseScanInputFromAudit({ cwd, packageManager: options.packageManager, format, workspace })
+    : Promise.resolve(parseScanInput(inputPath, format));
+}
+
+interface EvidenceSummaryInput {
+  cveCount: number;
+  outcome: ReturnType<typeof buildScanOutcome>;
+  execution: Awaited<ReturnType<typeof executeScanRemediations>>;
+  reports: RemediationReport[];
+  escalationCounts: ReturnType<typeof buildEscalationCounts>;
+  containmentCount: number;
+  patchesDir: string;
+  llmUsageTotals: ReturnType<typeof aggregateScanLlmUsage>;
+}
+
+function buildEvidenceSummary(
+  input: EvidenceSummaryInput,
+): ReturnType<typeof createEvidenceLog>["summary"] {
+  const { cveCount, outcome, execution, reports, escalationCounts, containmentCount } = input;
+  const { patchesDir, llmUsageTotals } = input;
+  const { status, successCount, failedCount, strategyCounts, dependencyScopeCounts } = outcome;
+  const { unresolvedByReason, dispositionCounts, simulationSummary, remediationCount } = outcome;
+  const { patchCount, patchValidationFailures } = execution;
+  return {
     status,
-    cveCount: cveIds.length,
+    cveCount,
     remediationCount,
     successCount,
     failedCount,
@@ -136,6 +156,52 @@ export async function remediateFromScan(
     totalOutputTokens: llmUsageTotals.totalOutputTokens,
     totalLlmLatencyMs: llmUsageTotals.totalLlmLatencyMs,
   };
+}
+
+interface FinishScanInput {
+  cwd: string;
+  options: ScanOptions;
+  cveIds: string[];
+  patchesDir: string;
+  execution: Awaited<ReturnType<typeof executeScanRemediations>>;
+  evidence: ReturnType<typeof createEvidenceLog>;
+  correlation: ReturnType<typeof resolveCorrelationContext>;
+  provenance: ReturnType<typeof resolveProvenanceContext>;
+  constraints: ReturnType<typeof resolveConstraints>;
+}
+
+/** Totals the remediation reports, writes the evidence log, opens change requests and builds the report. */
+async function finishScan(input: FinishScanInput): Promise<ScanReport> {
+  const { cwd, options, cveIds, patchesDir, execution, evidence } = input;
+  const { correlation, provenance, constraints } = input;
+  const reports: RemediationReport[] = execution.reports;
+  const { errors, patchCount, patchValidationFailures } = execution;
+  const containmentCount = countContainedResults(reports);
+  const escalationCounts = buildEscalationCounts(reports.flatMap((report) => report.results));
+
+  const llmUsageTotals = aggregateScanLlmUsage(reports);
+  const outcome = buildScanOutcome({ reports, errors });
+  const {
+    status,
+    successCount,
+    failedCount,
+    strategyCounts,
+    dependencyScopeCounts,
+    unresolvedByReason,
+    dispositionCounts,
+    simulationSummary,
+  } = outcome;
+
+  evidence.summary = buildEvidenceSummary({
+    cveCount: cveIds.length,
+    outcome,
+    execution,
+    reports,
+    escalationCounts,
+    containmentCount,
+    patchesDir,
+    llmUsageTotals,
+  });
 
   finalizeEvidence(evidence);
   const evidenceFile = options.evidence === false ? undefined : writeEvidenceLog(cwd, evidence);

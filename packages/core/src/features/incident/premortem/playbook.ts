@@ -5,8 +5,12 @@ import type { PackageBlastRadius, PlaybookKind, PremortemRepo, PremortemReport }
 /** Quote a value for a POSIX shell. */
 export const shellQuote = (value: string): string => `'${value.replaceAll("'", `'\\''`)}'`;
 
-const scripts = (value: boolean | "unknown"): string =>
-  value === "unknown" ? "unknown" : value ? "**yes**" : "no";
+function scripts(value: boolean | "unknown"): string {
+  if (value === "unknown") {
+    return "unknown";
+  }
+  return value ? "**yes**" : "no";
+}
 
 const INTRO =
   "A rehearsal document, written before anything went wrong. It lists what depends on the packages that matter most and the exact commands to run on the day one of them is reported compromised. It is generated from lockfiles, CI files and installed manifests; regenerate it with `autoremediator premortem` when dependencies change.";
@@ -131,11 +135,12 @@ export function renderPlaybook(
     const used = report.packages.filter((entry) =>
       entry.usage.some((usage) => usage.repo === repo.label),
     );
-    if (used.length === 0)
+    if (used.length === 0) {
       out.push(
         "Nothing assessed is locked here; use the commands below if a package you did not list is reported.",
         "",
       );
+    }
     for (const entry of used) {
       const usage = entry.usage.find((candidate) => candidate.repo === repo.label)!;
       out.push(

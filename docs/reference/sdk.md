@@ -120,7 +120,7 @@ above zero.
 
 | Function | Report fields |
 | -------- | ------------- |
-| `evaluatePackage` | `verdict` (`safe`, `caution`, `vulnerable`, `actively-exploited`), `isVulnerable`, `vulnerabilities[]`, `recommendedVersion`, `latestVersion` |
+| `evaluatePackage` | `verdict` (`safe`, `caution`, `vulnerable`, `actively-exploited`), `isVulnerable`, `vulnerabilities[]`, `recommendedVersion`, `latestVersion`. Throws for a name that is not a valid npm package name, and throws an `UpstreamError` (code `upstream-unavailable`) when OSV cannot be reached: an unanswered lookup is never reported as `safe`. |
 | `scanDelta` | `status` and `netRiskVerdict` (`improved`, `neutral`, `degraded`), `dependencyChanges[]`, `introducedFindings[]`, `resolvedFindings[]` |
 | `checkReachability` | `status` (`reachable`, `not-reachable`, `unknown`), `reason`, `reachabilityBasis` |
 

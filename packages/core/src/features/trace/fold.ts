@@ -94,8 +94,9 @@ export function foldTraceRecords(
       for (const entry of stringsOf(record.entries)) found.entries.add(entry);
       for (const dependent of stringsOf(record.dependents)) found.dependents.add(dependent);
       for (const format of stringsOf(record.formats)) {
-        if ((FORMATS as readonly string[]).includes(format))
+        if ((FORMATS as readonly string[]).includes(format)) {
           found.formats.add(format as ModuleFormat);
+        }
       }
     } else {
       const found = accumulator(record.name, record.version);
@@ -104,38 +105,16 @@ export function foldTraceRecords(
       }
       for (const name of stringsOf(record.wrapped)) found.wrapped.add(name);
       for (const [name, reason] of Object.entries(record.unwrapped ?? {})) {
-        if (typeof reason === "string" && !found.unwrapped.has(name))
+        if (typeof reason === "string" && !found.unwrapped.has(name)) {
           found.unwrapped.set(name, reason);
+        }
       }
     }
   }
 
   const packages: TracePackage[] = [...byPackage.values()]
     .toSorted((a, b) => a.name.localeCompare(b.name) || a.version.localeCompare(b.version))
-    .map((found) => {
-      const result: TracePackage = {
-        name: found.name,
-        version: found.version,
-        entries: [...found.entries].toSorted((a, b) => a.localeCompare(b)),
-        dependents: [...found.dependents].toSorted((a, b) => a.localeCompare(b)),
-        formats: [...found.formats].toSorted((a, b) => a.localeCompare(b)),
-      };
-      if (found.wrapped.size > 0 || found.unwrapped.size > 0 || found.calls.size > 0) {
-        const wrapped = new Set([...found.wrapped, ...found.calls.keys()]);
-        result.wrapped = [...wrapped].toSorted((a, b) => a.localeCompare(b));
-        result.calls = Object.fromEntries(
-          [...wrapped]
-            .toSorted((a, b) => a.localeCompare(b))
-            .map((name) => [name, found.calls.get(name) ?? 0]),
-        );
-        if (found.unwrapped.size > 0) {
-          result.unwrapped = Object.fromEntries(
-            [...found.unwrapped].toSorted(([a], [b]) => a.localeCompare(b)),
-          );
-        }
-      }
-      return result;
-    });
+    .map((found) => toTracePackage(found));
 
   const report: TraceReport = {
     schema: TRACE_SCHEMA,
@@ -188,4 +167,29 @@ export function readTraceFile(path: string): TraceReport {
     );
   }
   return foldTraceRecords(records, { skipped });
+}
+
+function toTracePackage(found: Accumulator): TracePackage {
+  const result: TracePackage = {
+    name: found.name,
+    version: found.version,
+    entries: [...found.entries].toSorted((a, b) => a.localeCompare(b)),
+    dependents: [...found.dependents].toSorted((a, b) => a.localeCompare(b)),
+    formats: [...found.formats].toSorted((a, b) => a.localeCompare(b)),
+  };
+  if (found.wrapped.size > 0 || found.unwrapped.size > 0 || found.calls.size > 0) {
+    const wrapped = new Set([...found.wrapped, ...found.calls.keys()]);
+    result.wrapped = [...wrapped].toSorted((a, b) => a.localeCompare(b));
+    result.calls = Object.fromEntries(
+      [...wrapped]
+        .toSorted((a, b) => a.localeCompare(b))
+        .map((name) => [name, found.calls.get(name) ?? 0]),
+    );
+    if (found.unwrapped.size > 0) {
+      result.unwrapped = Object.fromEntries(
+        [...found.unwrapped].toSorted(([a], [b]) => a.localeCompare(b)),
+      );
+    }
+  }
+  return result;
 }

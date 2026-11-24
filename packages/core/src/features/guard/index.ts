@@ -122,29 +122,7 @@ export async function guardPackage(
   }
 
   if (!packument) {
-    const lookalike = findLookalike(name);
-    return report(
-      spec,
-      [
-        {
-          check: "exists",
-          severity: "block",
-          message: `"${name}" does not exist on the registry. Assistants sometimes invent package names, and attackers register those names with malware.${lookalike ? ` Did you mean "${lookalike}"?` : ""}`,
-        },
-      ],
-      {
-        packageName: name,
-        ...(lookalike
-          ? {
-              alternative: {
-                packageName: lookalike,
-                reason: "a widely used package with a similar name",
-              },
-            }
-          : {}),
-      },
-      now,
-    );
+    return missingPackageReport(spec, name, now);
   }
 
   const version = resolveVersion(packument, range);
@@ -179,56 +157,9 @@ export async function guardPackage(
       message: "Offline: known-malware and advisory databases were not checked.",
     });
   } else {
-    try {
-      const malware = (await deps.osvIds(name, version)).filter((id) => id.startsWith("MAL-"));
-      if (malware.length > 0) {
-        findings.push({
-          check: "malware",
-          severity: "block",
-          message: `${name}@${version} is listed as malicious in the OSV malware feed (${malware.slice(0, 3).join(", ")}).`,
-        });
-      }
-    } catch {
-      findings.push({
-        check: "malware",
-        severity: "warn",
-        message: "The OSV malware feed could not be reached, so malware was not checked.",
-      });
-    }
-
-    try {
-      const evaluation = await deps.evaluate(name, { version, cwd: options.cwd });
-      const vulns = evaluation.vulnerabilities.filter((entry) => !entry.cveId.startsWith("MAL-"));
-      if (vulns.length > 0 && evaluation.verdict !== "safe") {
-        findings.push({
-          check: "vulnerabilities",
-          severity: evaluation.verdict === "actively-exploited" ? "block" : "warn",
-          message: `${name}@${version} has ${vulns.length} known ${vulns.length === 1 ? "vulnerability" : "vulnerabilities"} (${vulns
-            .slice(0, 3)
-            .map((v) => v.cveId)
-            .join(
-              ", ",
-            )}${evaluation.verdict === "actively-exploited" ? "; at least one is being exploited" : ""}).`,
-        });
-        if (
-          evaluation.recommendedVersion &&
-          evaluation.recommendedVersion !== version &&
-          !alternative
-        ) {
-          alternative = {
-            packageName: name,
-            version: evaluation.recommendedVersion,
-            reason: "a version without those vulnerabilities",
-          };
-        }
-      }
-    } catch {
-      findings.push({
-        check: "vulnerabilities",
-        severity: "warn",
-        message: "Known vulnerabilities could not be looked up.",
-      });
-    }
+    const online = await onlineFindings(name, version, options, deps, alternative);
+    findings.push(...online.findings);
+    alternative = online.alternative;
   }
 
   return report(
@@ -245,4 +176,96 @@ export async function guardPackages(
   options: GuardOptions = {},
 ): Promise<GuardReport[]> {
   return Promise.all(specs.map((spec) => guardPackage(spec, options)));
+}
+
+/** The report for a name the registry does not know, with a look-alike suggestion when there is one. */
+function missingPackageReport(spec: string, name: string, now: number): GuardReport {
+  const lookalike = findLookalike(name);
+  return report(
+    spec,
+    [
+      {
+        check: "exists",
+        severity: "block",
+        message: `"${name}" does not exist on the registry. Assistants sometimes invent package names, and attackers register those names with malware.${lookalike ? ` Did you mean "${lookalike}"?` : ""}`,
+      },
+    ],
+    {
+      packageName: name,
+      ...(lookalike
+        ? {
+            alternative: {
+              packageName: lookalike,
+              reason: "a widely used package with a similar name",
+            },
+          }
+        : {}),
+    },
+    now,
+  );
+}
+
+type GuardFindingEntry = ReturnType<typeof judgePackument>["findings"][number];
+
+/** The OSV malware feed and the known vulnerabilities for one version; a failed lookup is a warning. */
+async function onlineFindings(
+  name: string,
+  version: string,
+  options: GuardOptions,
+  deps: GuardDeps,
+  current: GuardAlternative | undefined,
+): Promise<{ findings: GuardFindingEntry[]; alternative: GuardAlternative | undefined }> {
+  const findings: GuardFindingEntry[] = [];
+  let alternative = current;
+  try {
+    const malware = (await deps.osvIds(name, version)).filter((id) => id.startsWith("MAL-"));
+    if (malware.length > 0) {
+      findings.push({
+        check: "malware",
+        severity: "block",
+        message: `${name}@${version} is listed as malicious in the OSV malware feed (${malware.slice(0, 3).join(", ")}).`,
+      });
+    }
+  } catch {
+    findings.push({
+      check: "malware",
+      severity: "warn",
+      message: "The OSV malware feed could not be reached, so malware was not checked.",
+    });
+  }
+
+  try {
+    const evaluation = await deps.evaluate(name, { version, cwd: options.cwd });
+    const vulns = evaluation.vulnerabilities.filter((entry) => !entry.cveId.startsWith("MAL-"));
+    if (vulns.length > 0 && evaluation.verdict !== "safe") {
+      findings.push({
+        check: "vulnerabilities",
+        severity: evaluation.verdict === "actively-exploited" ? "block" : "warn",
+        message: `${name}@${version} has ${vulns.length} known ${vulns.length === 1 ? "vulnerability" : "vulnerabilities"} (${vulns
+          .slice(0, 3)
+          .map((v) => v.cveId)
+          .join(
+            ", ",
+          )}${evaluation.verdict === "actively-exploited" ? "; at least one is being exploited" : ""}).`,
+      });
+      if (
+        evaluation.recommendedVersion &&
+        evaluation.recommendedVersion !== version &&
+        !alternative
+      ) {
+        alternative = {
+          packageName: name,
+          version: evaluation.recommendedVersion,
+          reason: "a version without those vulnerabilities",
+        };
+      }
+    }
+  } catch {
+    findings.push({
+      check: "vulnerabilities",
+      severity: "warn",
+      message: "Known vulnerabilities could not be looked up.",
+    });
+  }
+  return { findings, alternative };
 }

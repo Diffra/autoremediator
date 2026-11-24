@@ -19,16 +19,12 @@ export async function validatePatchArtifact(
   ];
 
   if (!inspection.exists) {
-    return {
-      patchFilePath: inspection.patchFilePath,
-      manifestFilePath: inspection.manifestFilePath,
+    return reportOf(inspection, validationPhases, {
       exists: false,
       manifestFound: false,
       diffValid: false,
-      formatError: inspection.formatError,
       driftDetected: false,
-      validationPhases,
-    };
+    });
   }
 
   const manifest = inspection.manifest;
@@ -41,16 +37,11 @@ export async function validatePatchArtifact(
       error: "No patch manifest found for this patch artifact.",
     });
 
-    return {
-      patchFilePath: inspection.patchFilePath,
-      manifestFilePath: inspection.manifestFilePath,
+    return reportOf(inspection, validationPhases, {
       exists: true,
       manifestFound,
-      diffValid: inspection.diffValid,
-      formatError: inspection.formatError,
       driftDetected: false,
-      validationPhases,
-    };
+    });
   }
 
   validationPhases.push({
@@ -70,19 +61,12 @@ export async function validatePatchArtifact(
       error: inventory.error,
     });
 
-    return {
-      patchFilePath: inspection.patchFilePath,
-      manifestFilePath: inspection.manifestFilePath,
+    return reportOf(inspection, validationPhases, {
       exists: true,
       manifestFound,
-      diffValid: inspection.diffValid,
-      formatError: inspection.formatError,
       driftDetected: false,
-      cveId: manifest.cveId,
-      packageName: manifest.packageName,
-      vulnerableVersion: manifest.vulnerableVersion,
-      validationPhases,
-    };
+      ...manifestFields(manifest),
+    });
   }
 
   const matchingPackages = (inventory.packages ?? []).filter(
@@ -95,30 +79,64 @@ export async function validatePatchArtifact(
   validationPhases.push({
     phase: "drift",
     passed: !driftDetected,
-    message:
-      matchingPackages.length === 0
-        ? `Package ${manifest.packageName} is not currently installed.`
-        : inventoryMatch
-          ? `Installed version matches manifest target ${manifest.vulnerableVersion}.`
-          : `Installed version ${installedVersion} does not match manifest target ${manifest.vulnerableVersion}.`,
+    message: driftMessage(manifest, matchingPackages.length, inventoryMatch, installedVersion),
     error: driftDetected
       ? "Patch manifest does not match the installed dependency version."
       : undefined,
   });
 
+  return reportOf(inspection, validationPhases, {
+    exists: true,
+    manifestFound,
+    driftDetected,
+    ...manifestFields(manifest),
+    installedVersion,
+    inventoryMatch,
+  });
+}
+
+function driftMessage(
+  target: { packageName: string; vulnerableVersion: string },
+  matchingCount: number,
+  inventoryMatch: boolean,
+  installedVersion: string | undefined,
+): string {
+  if (matchingCount === 0) {
+    return `Package ${target.packageName} is not currently installed.`;
+  }
+  if (inventoryMatch) {
+    return `Installed version matches manifest target ${target.vulnerableVersion}.`;
+  }
+  return `Installed version ${installedVersion} does not match manifest target ${target.vulnerableVersion}.`;
+}
+
+type Inspection = Awaited<ReturnType<typeof inspectPatchArtifact>>;
+type ReportFields = Pick<
+  PatchArtifactValidationReport,
+  "exists" | "manifestFound" | "driftDetected"
+> &
+  Partial<PatchArtifactValidationReport>;
+
+/** The report fields every outcome shares, with what differs between outcomes in `fields`. */
+function reportOf(
+  inspection: Inspection,
+  validationPhases: PatchValidationPhase[],
+  fields: ReportFields,
+): PatchArtifactValidationReport {
   return {
     patchFilePath: inspection.patchFilePath,
     manifestFilePath: inspection.manifestFilePath,
-    exists: true,
-    manifestFound,
     diffValid: inspection.diffValid,
     formatError: inspection.formatError,
-    driftDetected,
+    validationPhases,
+    ...fields,
+  };
+}
+
+function manifestFields(manifest: NonNullable<Inspection["manifest"]>) {
+  return {
     cveId: manifest.cveId,
     packageName: manifest.packageName,
     vulnerableVersion: manifest.vulnerableVersion,
-    installedVersion,
-    inventoryMatch,
-    validationPhases,
   };
 }

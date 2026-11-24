@@ -58,6 +58,47 @@ export function describePolicy(policy: AutoremediatorPolicy): PolicyRule[] {
     add("allowPackages", `Only these packages may be changed: ${list(policy.allowPackages)}.`);
   }
 
+  describeConstraints(policy, add);
+  describeExploitSignals(policy, add);
+  describeSuppressionsAndSla(policy, add);
+  describeDisposition(policy, add);
+  if (policy.autonomy) {
+    add(
+      "autonomy.ceiling",
+      `The autonomy ceiling is ${policy.autonomy.ceiling} (${LEVEL_NAMES[policy.autonomy.ceiling]}); Autoremediator never merges anything itself.`,
+    );
+  } else {
+    add("autonomy", "No autonomy ceiling is set, so earned autonomy is off.");
+  }
+  if (policy.recipes?.packages.length) {
+    add("recipes.packages", `Recipes are trusted from: ${list(policy.recipes.packages)}.`);
+  }
+  return rules;
+}
+
+/**
+ * Read the project's policy and describe it in plain sentences, with no model. A missing default
+ * file is described as the built-in defaults; a broken policy is an error, as everywhere else.
+ */
+export function explainPolicy(options: ExplainPolicyOptions = {}): ExplainPolicyResult {
+  const cwd = resolve(options.cwd ?? process.cwd());
+  const explicit = options.policy?.trim() ? options.policy : undefined;
+  const inline = explicit !== undefined && /^(?:\{|---)/.test(explicit.trim());
+  const path = inline ? undefined : resolve(cwd, explicit ?? join(".github", "autoremediator.yml"));
+  const exists = inline || (path !== undefined && existsSync(path));
+  const policy = loadPolicy(cwd, inline || explicit === undefined ? explicit : path);
+  const rules = describePolicy(policy);
+  return {
+    source: inline ? "(inline policy)" : (explicit ?? join(".github", "autoremediator.yml")),
+    exists,
+    rules,
+    sentences: rules.map((rule) => rule.sentence),
+  };
+}
+
+type AddRule = (key: string, sentence: string) => void;
+
+function describeConstraints(policy: AutoremediatorPolicy, add: AddRule): void {
   const constraints = policy.constraints ?? {};
   if (constraints.directDependenciesOnly) {
     add(
@@ -111,7 +152,9 @@ export function describePolicy(policy: AutoremediatorPolicy): PolicyRule[] {
       "A version must carry a provenance attestation.",
     );
   }
+}
 
+function describeExploitSignals(policy: AutoremediatorPolicy, add: AddRule): void {
   const exploit = policy.exploitSignalOverride;
   if (exploit?.kev?.mandatory) {
     add(
@@ -125,7 +168,9 @@ export function describePolicy(policy: AutoremediatorPolicy): PolicyRule[] {
       `Vulnerabilities with an EPSS score above ${exploit.epss.threshold} are always remediated, whatever their severity.`,
     );
   }
+}
 
+function describeSuppressionsAndSla(policy: AutoremediatorPolicy, add: AddRule): void {
   for (const entry of policy.suppressions ?? []) {
     const note = entry.notes ? ` (${sanitizeNote(entry.notes)})` : "";
     const until = entry.expiresAt ? ` until ${entry.expiresAt.slice(0, 10)}` : " with no expiry";
@@ -148,7 +193,9 @@ export function describePolicy(policy: AutoremediatorPolicy): PolicyRule[] {
   if (policy.skipUnreachable) {
     add("skipUnreachable", "Vulnerabilities in code the project never reaches are skipped.");
   }
+}
 
+function describeDisposition(policy: AutoremediatorPolicy, add: AddRule): void {
   const disposition = policy.dispositionPolicy;
   if (disposition?.minConfidenceForAutoApply !== undefined) {
     add(
@@ -188,37 +235,4 @@ export function describePolicy(policy: AutoremediatorPolicy): PolicyRule[] {
         : `When a result is unresolved as ${reason}, the follow-up is ${action}.`,
     );
   }
-
-  if (policy.autonomy) {
-    add(
-      "autonomy.ceiling",
-      `The autonomy ceiling is ${policy.autonomy.ceiling} (${LEVEL_NAMES[policy.autonomy.ceiling]}); Autoremediator never merges anything itself.`,
-    );
-  } else {
-    add("autonomy", "No autonomy ceiling is set, so earned autonomy is off.");
-  }
-  if (policy.recipes?.packages.length) {
-    add("recipes.packages", `Recipes are trusted from: ${list(policy.recipes.packages)}.`);
-  }
-  return rules;
-}
-
-/**
- * Read the project's policy and describe it in plain sentences, with no model. A missing default
- * file is described as the built-in defaults; a broken policy is an error, as everywhere else.
- */
-export function explainPolicy(options: ExplainPolicyOptions = {}): ExplainPolicyResult {
-  const cwd = resolve(options.cwd ?? process.cwd());
-  const explicit = options.policy?.trim() ? options.policy : undefined;
-  const inline = explicit !== undefined && /^(?:\{|---)/.test(explicit.trim());
-  const path = inline ? undefined : resolve(cwd, explicit ?? join(".github", "autoremediator.yml"));
-  const exists = inline || (path !== undefined && existsSync(path));
-  const policy = loadPolicy(cwd, inline ? explicit : explicit === undefined ? undefined : path);
-  const rules = describePolicy(policy);
-  return {
-    source: inline ? "(inline policy)" : (explicit ?? join(".github", "autoremediator.yml")),
-    exists,
-    rules,
-    sentences: rules.map((rule) => rule.sentence),
-  };
 }

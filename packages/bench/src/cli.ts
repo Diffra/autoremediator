@@ -91,11 +91,7 @@ async function main(): Promise<void> {
 
   const allTasks = loadTasks();
   if (values.list) {
-    for (const task of allTasks) {
-      process.stdout.write(
-        `${task.id}\t${task.control ? "control" : task.expect.outcome}\t${task.title}\n`,
-      );
-    }
+    listTasks(allTasks);
     return;
   }
   if (values.report) {
@@ -108,16 +104,7 @@ async function main(): Promise<void> {
 
   const modes = parseModes(values.mode);
   const model = values.model ?? undefined;
-  if (modes.includes("agent-model") && !model) {
-    throw new Error(
-      "--mode agent-model needs --model <provider>:<model-id>, plus that provider's API key in the environment.",
-    );
-  }
-  if (modes.includes("agent-model") && modes.length > 1) {
-    throw new Error(
-      "Run agent-model on its own: it needs the network, and the other modes run with every non-local request blocked.",
-    );
-  }
+  assertModelModeUsable(modes, model);
   const tasks = selectTasks(allTasks, values.task);
   const partial = values.task !== undefined;
   const save = values.write ?? !partial;
@@ -125,11 +112,7 @@ async function main(): Promise<void> {
   const workRoot = join(benchDir, ".work", `${Date.now()}`);
   const hermeticEnv = applyHermeticEnv(workRoot, { allowNetwork: modes.includes("agent-model") });
   const state = await gitState();
-  const version = (
-    JSON.parse(readFileSync(join(repoRoot, "packages", "core", "package.json"), "utf8")) as {
-      version: string;
-    }
-  ).version;
+  const version = readCoreVersion();
   const registry = await startRegistry();
   let harnessProblem = false;
 
@@ -153,29 +136,10 @@ async function main(): Promise<void> {
       if (results.some((r) => r.outcome === "error" || (r.control && r.controlCaught !== true))) {
         harnessProblem = true;
       }
-      log(
-        `  ${summary.pass}/${summary.tasks} PASS (fixed ${summary.byExpected.fixed.pass}/${summary.byExpected.fixed.total}, unresolved ${summary.byExpected.unresolved.pass}/${summary.byExpected.unresolved.total}, refused ${summary.byExpected.refused.pass}/${summary.byExpected.refused.total}); false claims ${summary.falseClaims}; controls caught ${summary.controls.caught}/${summary.controls.total}`,
-      );
+      log(formatSummary(summary));
 
       if (!save) continue;
-      const file: ResultFile = {
-        schemaVersion: RESULT_SCHEMA_VERSION,
-        mode,
-        date: startedAt.toISOString().slice(0, 10),
-        startedAt: startedAt.toISOString(),
-        commit: state.commit,
-        dirty: state.dirty,
-        autoremediatorVersion: version,
-        node: process.version,
-        platform: `${process.platform} ${process.arch}`,
-        ...(mode === "agent-model" && model ? { model } : {}),
-        tasks: results,
-        summary,
-      };
-      mkdirSync(resultsDir, { recursive: true });
-      const path = join(resultsDir, `${mode}.json`);
-      writeFileSync(path, `${JSON.stringify(file, null, 2)}\n`);
-      log(`  wrote ${path.slice(repoRoot.length + 1)}`);
+      saveResult({ mode, startedAt, state, version, model, results, summary });
     }
     if (save) {
       const written = regeneratePages(allTasks);
@@ -201,3 +165,73 @@ main().catch((error: unknown) => {
   // failed run alive and idle until something kills it.
   process.exit(1);
 });
+
+function formatSummary(summary: Summary): string {
+  const { byExpected } = summary;
+  return `  ${summary.pass}/${summary.tasks} PASS (fixed ${byExpected.fixed.pass}/${byExpected.fixed.total}, unresolved ${byExpected.unresolved.pass}/${byExpected.unresolved.total}, refused ${byExpected.refused.pass}/${byExpected.refused.total}); false claims ${summary.falseClaims}; controls caught ${summary.controls.caught}/${summary.controls.total}`;
+}
+
+type Summary = ReturnType<typeof summarize>;
+
+interface SaveInput {
+  mode: ResultFile["mode"];
+  startedAt: Date;
+  state: Awaited<ReturnType<typeof gitState>>;
+  version: string;
+  model: string | undefined;
+  results: ResultFile["tasks"];
+  summary: Summary;
+}
+
+/** Writes `results/<mode>.json`; a new run replaces the old file in place. */
+function saveResult(input: SaveInput): void {
+  const { mode, startedAt, state, version, model, results, summary } = input;
+  const file: ResultFile = {
+    schemaVersion: RESULT_SCHEMA_VERSION,
+    mode,
+    date: startedAt.toISOString().slice(0, 10),
+    startedAt: startedAt.toISOString(),
+    commit: state.commit,
+    dirty: state.dirty,
+    autoremediatorVersion: version,
+    node: process.version,
+    platform: `${process.platform} ${process.arch}`,
+    ...(mode === "agent-model" && model ? { model } : {}),
+    tasks: results,
+    summary,
+  };
+  mkdirSync(resultsDir, { recursive: true });
+  const path = join(resultsDir, `${mode}.json`);
+  writeFileSync(path, `${JSON.stringify(file, null, 2)}\n`);
+  log(`  wrote ${path.slice(repoRoot.length + 1)}`);
+}
+
+function assertModelModeUsable(modes: readonly string[], model: string | undefined): void {
+  if (modes.includes("agent-model") && !model) {
+    throw new Error(
+      "--mode agent-model needs --model <provider>:<model-id>, plus that provider's API key in the environment.",
+    );
+  }
+  if (modes.includes("agent-model") && modes.length > 1) {
+    throw new Error(
+      "Run agent-model on its own: it needs the network, and the other modes run with every non-local request blocked.",
+    );
+  }
+}
+
+function readCoreVersion(): string {
+  const manifest = JSON.parse(
+    readFileSync(join(repoRoot, "packages", "core", "package.json"), "utf8"),
+  ) as {
+    version: string;
+  };
+  return manifest.version;
+}
+
+function listTasks(tasks: ReturnType<typeof loadTasks>): void {
+  for (const task of tasks) {
+    process.stdout.write(
+      `${task.id}\t${task.control ? "control" : task.expect.outcome}\t${task.title}\n`,
+    );
+  }
+}

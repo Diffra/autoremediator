@@ -40,13 +40,12 @@ export function applyEvents(
   return outcomes.map((outcome) => {
     const applied = outcome.status === "applied";
     const rejected = !applied && outcome.verification && !outcome.verification.passed;
-    const type: NewTrackEvent["type"] = applied
-      ? outcome.verification?.passed
-        ? "applied-verified"
-        : "applied-unverified"
-      : rejected
-        ? "verifier-failure"
-        : "apply-failed";
+    let type: NewTrackEvent["type"] = "apply-failed";
+    if (applied) {
+      type = outcome.verification?.passed ? "applied-verified" : "applied-unverified";
+    } else if (rejected) {
+      type = "verifier-failure";
+    }
     const detail = rejected
       ? `${outcome.packageName} ${outcome.fromVersion} -> ${outcome.toVersion}: ${firstLine(outcome.message)}`
       : `${outcome.packageName} ${outcome.fromVersion} -> ${outcome.toVersion} (${outcome.strategy}): ${applied ? "applied" : (outcome.unresolvedReason ?? firstLine(outcome.message))}${outcome.repair?.status === "promoted" ? ", repaired by an agent" : ""}`;

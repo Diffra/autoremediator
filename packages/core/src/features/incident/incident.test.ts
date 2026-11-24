@@ -478,8 +478,9 @@ describe("incident: rotation checklist", () => {
       .git("ls-files", "--others", "--ignored", "--exclude-standard")
       .split("\n");
     for (const file of runFiles.filter((entry) => entry.startsWith(".autoremediator/"))) {
-      for (const value of SECRET_VALUES)
+      for (const value of SECRET_VALUES) {
         expect(readFileSync(join(repo.dir, file), "utf8")).not.toContain(value);
+      }
     }
   });
 

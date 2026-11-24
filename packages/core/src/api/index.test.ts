@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { buildResultSimulation, buildSlaBreachSummary } from "../features/remediate/reporting.js";
+import { buildSlaBreachSummary } from "../features/remediate/reporting.js";
+import { buildResultSimulation } from "../features/remediate/simulation.js";
 
 const mocked = vi.hoisted(() => ({
   runRemediationPipeline: vi.fn(),

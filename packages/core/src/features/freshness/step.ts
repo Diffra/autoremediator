@@ -223,27 +223,7 @@ export async function applyFreshness(
       planId: planned.planId,
     };
 
-    const run = await applyPlan(
-      {
-        cwd,
-        runId: planned.runId,
-        ...(options.verify === undefined ? {} : { verify: options.verify }),
-        ...(options.repair === undefined ? {} : { repair: options.repair }),
-        ...(options.model ? { model: options.model } : {}),
-        ...(options.repairAgent ? { repairAgent: options.repairAgent } : {}),
-        ...(options.repairBudget ? { repairBudget: options.repairBudget } : {}),
-        ...(options.signal ? { signal: options.signal } : {}),
-      },
-      runDeps,
-    ).catch((error: unknown) => {
-      // A refusal is not a failed step: stop here instead of recording every remaining package as failed.
-      if (error instanceof AutonomyRefusedError) throw error;
-      return {
-        status: "failed" as const,
-        message: errorMessage(error),
-        items: [],
-      };
-    });
+    const run = await runStep(options, cwd, planned.runId, runDeps);
     const runSummary = { status: run.status, message: run.message };
 
     if (run.status === "applied") {
@@ -257,16 +237,7 @@ export async function applyFreshness(
       outcomes.push(outcome);
       if (options.changeRequest?.enabled) {
         await openChangeRequest(outcome, options, cwd, runDeps);
-        // The step now lives on its own branch for review. A later step of the same package would
-        // build on a change that is not merged, so it waits for the next call.
-        skip.add(step.packageName);
-        if (step.index < step.of) {
-          awaiting.add(step.packageName);
-          stopped.push({
-            packageName: step.packageName,
-            reason: `step ${step.index} of ${step.of} awaits review in its change request; the next step comes after it is merged.`,
-          });
-        }
+        holdForReview(step, { skip, awaiting, stopped });
       }
       continue;
     }
@@ -275,9 +246,7 @@ export async function applyFreshness(
     // rollback closes the run's record and makes sure the project is exactly as before.
     failed++;
     const detail = run.items?.[0]?.message ?? run.message;
-    const rolledBack = await rollbackRun({ cwd, runId: planned.runId, force: true }, runDeps)
-      .then(() => true)
-      .catch(() => false);
+    const rolledBack = await rollbackQuietly(cwd, planned.runId, runDeps);
     outcomes.push({
       ...base,
       status: "failed",
@@ -294,31 +263,9 @@ export async function applyFreshness(
   first ??= (await analyse(options, deps, cache, skip)).report;
   for (const entry of last?.held ?? []) stopped.push(entry);
 
-  // Packages with a step still to take, by the last analysis (taken before the step that followed it).
-  const doneWith = (name: string, steps: number): boolean =>
-    steps <= 1 && outcomes.some((o) => o.step.packageName === name && o.status === "applied");
-  const remaining = [
-    ...new Set([
-      ...(last?.climbs ?? [])
-        .filter(
-          (climb) =>
-            !climb.held &&
-            !failedPackages.has(climb.packageName) &&
-            !doneWith(climb.packageName, climb.steps.length),
-        )
-        .map((climb) => climb.packageName),
-      ...awaiting,
-    ]),
-  ];
+  const remaining = remainingPackages(last, outcomes, failedPackages, awaiting);
 
-  const status: ApplyFreshnessResult["status"] =
-    outcomes.length === 0
-      ? "nothing-to-do"
-      : failed === 0
-        ? "ok"
-        : applied === 0
-          ? "failed"
-          : "partial";
+  const status = applyStatus(outcomes.length, failed, applied);
   return {
     status,
     steps: outcomes,
@@ -337,8 +284,9 @@ function summarise(
   report: FreshnessReport,
 ): string {
   if (status === "nothing-to-do") {
-    if (!report.policy)
+    if (!report.policy) {
       return "The policy has no `freshness` key, so there is no limit to climb towards.";
+    }
     return report.climbs.length === 0
       ? "Every direct dependency is within the freshness policy."
       : "Every step that is due is held; see stopped.";
@@ -364,8 +312,9 @@ async function openChangeRequest(
     });
     if (result) {
       outcome.changeRequest = result;
-      if (result.error)
+      if (result.error) {
         outcome.message = `${outcome.message} Change request not created: ${result.error}`;
+      }
     }
   } catch (error) {
     outcome.message = `${outcome.message} Change request not created: ${errorMessage(error)}`;
@@ -381,5 +330,102 @@ async function openChangeRequest(
       .catch((error: unknown) => {
         outcome.message = `${outcome.message} Reinstall after returning to the base branch failed: ${errorMessage(error)}`;
       });
+  }
+}
+
+function applyStatus(
+  total: number,
+  failed: number,
+  applied: number,
+): ApplyFreshnessResult["status"] {
+  if (total === 0) {
+    return "nothing-to-do";
+  }
+  if (failed === 0) {
+    return "ok";
+  }
+  return applied === 0 ? "failed" : "partial";
+}
+
+/** Applies the recorded plan of one step. A failure other than a refusal becomes a failed result. */
+async function runStep(
+  options: ApplyFreshnessOptions,
+  cwd: string,
+  runId: string,
+  runDeps: RunDeps,
+) {
+  return applyPlan(
+    {
+      cwd,
+      runId,
+      ...(options.verify === undefined ? {} : { verify: options.verify }),
+      ...(options.repair === undefined ? {} : { repair: options.repair }),
+      ...(options.model ? { model: options.model } : {}),
+      ...(options.repairAgent ? { repairAgent: options.repairAgent } : {}),
+      ...(options.repairBudget ? { repairBudget: options.repairBudget } : {}),
+      ...(options.signal ? { signal: options.signal } : {}),
+    },
+    runDeps,
+  ).catch((error: unknown) => {
+    // A refusal is not a failed step: stop here instead of recording every remaining package as failed.
+    if (error instanceof AutonomyRefusedError) throw error;
+    return {
+      status: "failed" as const,
+      message: errorMessage(error),
+      items: [],
+    };
+  });
+}
+
+/** Takes a failed step's run back out; whether that worked is recorded, not thrown. */
+function rollbackQuietly(cwd: string, runId: string, runDeps: RunDeps): Promise<boolean> {
+  return rollbackRun({ cwd, runId, force: true }, runDeps)
+    .then(() => true)
+    .catch(() => false);
+}
+
+/** Packages with a step still to take, by the last analysis (taken before the step that followed it). */
+function remainingPackages(
+  last: Analysis | undefined,
+  outcomes: readonly FreshnessStepOutcome[],
+  failedPackages: ReadonlySet<string>,
+  awaiting: ReadonlySet<string>,
+): string[] {
+  const doneWith = (name: string, steps: number): boolean =>
+    steps <= 1 && outcomes.some((o) => o.step.packageName === name && o.status === "applied");
+  return [
+    ...new Set([
+      ...(last?.climbs ?? [])
+        .filter(
+          (climb) =>
+            !climb.held &&
+            !failedPackages.has(climb.packageName) &&
+            !doneWith(climb.packageName, climb.steps.length),
+        )
+        .map((climb) => climb.packageName),
+      ...awaiting,
+    ]),
+  ];
+}
+
+/**
+ * The step now lives on its own branch for review. A later step of the same package would build on
+ * a change that is not merged, so it waits for the next call.
+ */
+function holdForReview(
+  step: FreshnessStepOutcome["step"],
+  state: {
+    skip: Set<string>;
+    awaiting: Set<string>;
+    stopped: ApplyFreshnessResult["stopped"];
+  },
+): void {
+  state.skip.add(step.packageName);
+  if (step.index < step.of) {
+    state.awaiting.add(step.packageName);
+    state.stopped.push({
+      packageName: step.packageName,
+      reason: `step ${step.index} of ${step.of} awaits review in its change request; the next step comes after it is merged.`,
+    });
   }
 }

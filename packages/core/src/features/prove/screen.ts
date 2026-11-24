@@ -100,13 +100,7 @@ interface Walk {
 function visit(node: Node, walk: Walk, parent?: Node): void {
   switch (node.type) {
     case "Identifier": {
-      const name = node.name as string;
-      const why = FORBIDDEN_IDENTIFIERS[name];
-      if (why) walk.violations.add(`${name}: ${why}`);
-      if (name === "require")
-        walk.violations.add("uses `require` other than by calling it with a literal module name");
-      if (name === "process")
-        walk.violations.add("uses `process` other than exit, exitCode, stdout, stderr or nextTick");
+      checkIdentifier(node, walk);
       return;
     }
     case "MetaProperty": {
@@ -114,68 +108,15 @@ function visit(node: Node, walk: Walk, parent?: Node): void {
       return;
     }
     case "Literal": {
-      if (typeof node.value === "string") {
-        if (/\bpackage\.json\b/.test(node.value)) {
-          walk.violations.add(
-            "reads the package manifest (the script must call the package, not look at its version)",
-          );
-        }
-        if (node.value === "version" || node.value === "versions") {
-          walk.violations.add(
-            "reads a version (the script must call the package, not look at its version)",
-          );
-        }
-      }
+      checkLiteral(node, walk);
       return;
     }
     case "MemberExpression": {
-      const object = node.object;
-      const property = node.property;
-      const computed = node.computed === true;
-      if (!computed && isNode(property) && property.type === "Identifier") {
-        const name = property.name as string;
-        if (name === "version" || name === "versions") {
-          walk.violations.add(
-            "reads a version (the script must call the package, not look at its version)",
-          );
-        }
-        if (name === "constructor")
-          walk.violations.add("reaches the Function constructor through `.constructor`");
-      }
-      if (isNode(object) && object.type === "Identifier" && object.name === "process") {
-        if (
-          computed ||
-          !isNode(property) ||
-          property.type !== "Identifier" ||
-          !ALLOWED_PROCESS_MEMBERS.has(property.name as string)
-        ) {
-          const used =
-            !computed && isNode(property) && property.type === "Identifier"
-              ? `process.${String(property.name)}`
-              : "process[...]";
-          walk.violations.add(
-            `${used}: uses a process API the script has no need for (environment, signals, version, directory)`,
-          );
-        }
-        if (computed) visit(property as Node, walk, node);
-        return;
-      }
-      visit(object as Node, walk, node);
-      if (computed && isNode(property)) visit(property, walk, node);
+      visitMember(node, walk);
       return;
     }
     case "CallExpression": {
-      const callee = node.callee;
-      if (isNode(callee) && callee.type === "Identifier" && callee.name === "require") {
-        const args = node.arguments as unknown[];
-        const specifier = literalString(args[0]);
-        if (specifier === undefined || args.length !== 1)
-          walk.violations.add("loads a module by a computed name");
-        else walk.specifiers.push(specifier);
-        for (const arg of args)
-          if (isNode(arg) && literalString(arg) === undefined) visit(arg, walk, node);
-        return;
-      }
+      if (visitRequireCall(node, walk)) return;
       break;
     }
     case "ImportExpression": {
@@ -282,4 +223,87 @@ export function screenScript(
     }
   }
   return { ok: violations.size === 0, violations: [...violations] };
+}
+
+function checkIdentifier(node: Node, walk: Walk): void {
+  const name = node.name as string;
+  const why = FORBIDDEN_IDENTIFIERS[name];
+  if (why) walk.violations.add(`${name}: ${why}`);
+  if (name === "require") {
+    walk.violations.add("uses `require` other than by calling it with a literal module name");
+  }
+  if (name === "process") {
+    walk.violations.add("uses `process` other than exit, exitCode, stdout, stderr or nextTick");
+  }
+}
+
+function checkLiteral(node: Node, walk: Walk): void {
+  if (typeof node.value === "string") {
+    if (/\bpackage\.json\b/.test(node.value)) {
+      walk.violations.add(
+        "reads the package manifest (the script must call the package, not look at its version)",
+      );
+    }
+    if (node.value === "version" || node.value === "versions") {
+      walk.violations.add(
+        "reads a version (the script must call the package, not look at its version)",
+      );
+    }
+  }
+}
+
+/** `process.x` is screened against an allow list; any other member access is walked into. */
+function visitMember(node: Node, walk: Walk): void {
+  const object = node.object;
+  const property = node.property;
+  const computed = node.computed === true;
+  if (!computed && isNode(property) && property.type === "Identifier") {
+    const name = property.name as string;
+    if (name === "version" || name === "versions") {
+      walk.violations.add(
+        "reads a version (the script must call the package, not look at its version)",
+      );
+    }
+    if (name === "constructor") {
+      walk.violations.add("reaches the Function constructor through `.constructor`");
+    }
+  }
+  if (isNode(object) && object.type === "Identifier" && object.name === "process") {
+    if (
+      computed ||
+      !isNode(property) ||
+      property.type !== "Identifier" ||
+      !ALLOWED_PROCESS_MEMBERS.has(property.name as string)
+    ) {
+      const used =
+        !computed && isNode(property) && property.type === "Identifier"
+          ? `process.${String(property.name)}`
+          : "process[...]";
+      walk.violations.add(
+        `${used}: uses a process API the script has no need for (environment, signals, version, directory)`,
+      );
+    }
+    if (computed) visit(property as Node, walk, node);
+    return;
+  }
+  visit(object as Node, walk, node);
+  if (computed && isNode(property)) visit(property, walk, node);
+  return;
+}
+
+/** A `require(...)` call: record the module it names. Returns false for any other call. */
+function visitRequireCall(node: Node, walk: Walk): boolean {
+  const callee = node.callee;
+  if (isNode(callee) && callee.type === "Identifier" && callee.name === "require") {
+    const args = node.arguments as unknown[];
+    const specifier = literalString(args[0]);
+    if (specifier === undefined || args.length !== 1) {
+      walk.violations.add("loads a module by a computed name");
+    } else walk.specifiers.push(specifier);
+    for (const arg of args) {
+      if (isNode(arg) && literalString(arg) === undefined) visit(arg, walk, node);
+    }
+    return true;
+  }
+  return false;
 }

@@ -111,43 +111,7 @@ export function generateUnifiedDiff(
     return null;
   }
 
-  const aLines = splitLines(original);
-  const bLines = splitLines(fixed);
-
-  // Fast-path: trim common prefix and suffix for performance
-  let prefixCount = 0;
-  while (
-    prefixCount < aLines.length &&
-    prefixCount < bLines.length &&
-    aLines[prefixCount] === bLines[prefixCount]
-  ) {
-    prefixCount++;
-  }
-
-  let suffixCount = 0;
-  while (
-    suffixCount < aLines.length - prefixCount &&
-    suffixCount < bLines.length - prefixCount &&
-    aLines[aLines.length - 1 - suffixCount] === bLines[bLines.length - 1 - suffixCount]
-  ) {
-    suffixCount++;
-  }
-
-  const prefixEdits: DiffEdit[] = [];
-  for (let i = 0; i < prefixCount; i++) {
-    prefixEdits.push({ type: "common", text: aLines[i]! });
-  }
-
-  const suffixEdits: DiffEdit[] = [];
-  for (let i = aLines.length - suffixCount; i < aLines.length; i++) {
-    suffixEdits.push({ type: "common", text: aLines[i]! });
-  }
-
-  const aMiddle = aLines.slice(prefixCount, aLines.length - suffixCount);
-  const bMiddle = bLines.slice(prefixCount, bLines.length - suffixCount);
-
-  const middleEdits = myersDiff(aMiddle, bMiddle);
-  const edits = [...prefixEdits, ...middleEdits, ...suffixEdits];
+  const edits = diffEdits(splitLines(original), splitLines(fixed));
 
   // Find edit indices
   const changeIndices: number[] = [];
@@ -161,21 +125,7 @@ export function generateUnifiedDiff(
     return null;
   }
 
-  // Group into hunks separated by > 2 * context unchanged lines
-  const groups: number[][] = [];
-  let currentGroup: number[] = [changeIndices[0]!];
-
-  for (let i = 1; i < changeIndices.length; i++) {
-    const prev = changeIndices[i - 1]!;
-    const curr = changeIndices[i]!;
-    if (curr - prev - 1 <= 2 * context) {
-      currentGroup.push(curr);
-    } else {
-      groups.push(currentGroup);
-      currentGroup = [curr];
-    }
-  }
-  groups.push(currentGroup);
+  const groups = groupChanges(changeIndices, context);
 
   const hunkStrings: string[] = [];
 
@@ -237,4 +187,61 @@ export function generateUnifiedDiff(
   }
 
   return [`--- a/${filePath}`, `+++ b/${filePath}`, ...hunkStrings].join("\n") + "\n";
+}
+
+/** The edit script between two line lists, with the common head and tail trimmed off first. */
+function diffEdits(aLines: string[], bLines: string[]): DiffEdit[] {
+  // Fast-path: trim common prefix and suffix for performance
+  let prefixCount = 0;
+  while (
+    prefixCount < aLines.length &&
+    prefixCount < bLines.length &&
+    aLines[prefixCount] === bLines[prefixCount]
+  ) {
+    prefixCount++;
+  }
+
+  let suffixCount = 0;
+  while (
+    suffixCount < aLines.length - prefixCount &&
+    suffixCount < bLines.length - prefixCount &&
+    aLines[aLines.length - 1 - suffixCount] === bLines[bLines.length - 1 - suffixCount]
+  ) {
+    suffixCount++;
+  }
+
+  const prefixEdits: DiffEdit[] = [];
+  for (let i = 0; i < prefixCount; i++) {
+    prefixEdits.push({ type: "common", text: aLines[i]! });
+  }
+
+  const suffixEdits: DiffEdit[] = [];
+  for (let i = aLines.length - suffixCount; i < aLines.length; i++) {
+    suffixEdits.push({ type: "common", text: aLines[i]! });
+  }
+
+  const aMiddle = aLines.slice(prefixCount, aLines.length - suffixCount);
+  const bMiddle = bLines.slice(prefixCount, bLines.length - suffixCount);
+
+  const middleEdits = myersDiff(aMiddle, bMiddle);
+  return [...prefixEdits, ...middleEdits, ...suffixEdits];
+}
+
+/** Groups change indices into hunks, split where more than 2 * context unchanged lines separate them. */
+function groupChanges(changeIndices: number[], context: number): number[][] {
+  const groups: number[][] = [];
+  let currentGroup: number[] = [changeIndices[0]!];
+
+  for (let i = 1; i < changeIndices.length; i++) {
+    const prev = changeIndices[i - 1]!;
+    const curr = changeIndices[i]!;
+    if (curr - prev - 1 <= 2 * context) {
+      currentGroup.push(curr);
+    } else {
+      groups.push(currentGroup);
+      currentGroup = [curr];
+    }
+  }
+  groups.push(currentGroup);
+  return groups;
 }

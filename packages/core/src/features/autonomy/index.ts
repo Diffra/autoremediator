@@ -7,8 +7,8 @@ import { errorMessage } from "../../shared/errors.js";
  * The feature is opt-in. Without an `autonomy` key in the policy file none of this does anything:
  * nothing is refused, nothing is recorded, and reports carry no autonomy field.
  */
-import { evaluate, effectiveLevel, nextPromotion, signalsFor, transitionsOf } from "./compute.js";
-import type { CapInfo, NextPromotion, OutcomeFacts, Transition, WindowStats } from "./compute.js";
+import { evaluate, effectiveLevel, nextPromotion, signalsFor } from "./compute.js";
+import type { CapInfo, NextPromotion, OutcomeFacts, WindowStats } from "./compute.js";
 import {
   appendTrackEvents,
   readTrackRecord,
@@ -16,6 +16,7 @@ import {
   TRACK_RECORD_PATH,
   TrackRecordError,
 } from "./record.js";
+import { transitionsOf, type Transition } from "./transitions.js";
 import {
   type AutonomyConfig,
   type AutonomyLevel,
@@ -106,8 +107,9 @@ function stateOf(cwd: string, policy: string | undefined): State | undefined {
   try {
     return { config, events: readTrackRecord(cwd).events };
   } catch (error) {
-    if (error instanceof TrackRecordError)
+    if (error instanceof TrackRecordError) {
       return { config, events: [], recordError: error.message };
+    }
     throw error;
   }
 }
@@ -192,11 +194,12 @@ export function assertAutonomyAllows(
   const { evaluation, level } = levelOfState(state, now);
   if (LEVEL_ALLOWS[level][action]) return;
 
-  const why = state.recordError
-    ? state.recordError
-    : level === state.config.ceiling && level !== evaluation.earned
+  const cappedByPolicy = level === state.config.ceiling && level !== evaluation.earned;
+  const why =
+    state.recordError ||
+    (cappedByPolicy
       ? `the policy ceiling is ${state.config.ceiling}`
-      : (evaluation.reasons[0] ?? "see the track record");
+      : (evaluation.reasons[0] ?? "see the track record"));
   throw new AutonomyRefusedError(
     `${what} refused: autonomy is ${level} (${LEVEL_NAMES[level]}), which does not allow ${action === "apply" ? "changing the project" : "recording plans"}. ` +
       `Ceiling ${state.config.ceiling}, earned ${evaluation.earned}: ${why}. ` +

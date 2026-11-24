@@ -197,8 +197,9 @@ export function findLookalike(name: string): string | undefined {
     if (popular.length < 5) continue;
     if (squash(popular) === squash(name)) return popular;
     const limit = popular.length >= 9 ? 2 : 1;
-    if (Math.abs(popular.length - name.length) <= limit && editDistance(popular, name) <= limit)
+    if (Math.abs(popular.length - name.length) <= limit && editDistance(popular, name) <= limit) {
       return popular;
+    }
   }
   return undefined;
 }

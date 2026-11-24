@@ -154,8 +154,9 @@ export const hostScripted: Mode = {
           !item.unresolvedReason ||
           !REPAIRABLE.has(item.unresolvedReason) ||
           task.oracleFiles.size === 0
-        )
+        ) {
           continue;
+        }
 
         const attempt = await host.call<AttemptViewShape>("startAttempt", {
           cwd,

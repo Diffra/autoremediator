@@ -39,8 +39,9 @@ export function describeMaintain(result: MaintainResult): string {
   const lines = [
     `Maintaining ${result.package.name}@${result.package.version}${result.nextVersion ? ` (next release ${result.nextVersion})` : ""}`,
   ];
-  if (result.advisories.length === 0)
+  if (result.advisories.length === 0) {
     lines.push("No advisories found for this project's dependencies.");
+  }
   for (const advisory of result.advisories) {
     lines.push(
       `  ${advisory.id}${advisory.severity ? ` [${advisory.severity}]` : ""}: ${advisory.decision}`,
@@ -59,8 +60,9 @@ export function describeMaintain(result: MaintainResult): string {
       );
     }
   }
-  for (const change of result.changes)
+  for (const change of result.changes) {
     lines.push(`  ${change.action.padEnd(9)} ${change.path}: ${change.reason}`);
+  }
   for (const note of result.notes) lines.push(`  note: ${note}`);
   return lines.join("\n");
 }
@@ -126,9 +128,9 @@ export async function runMaintain(opts: MaintainCliOptions): Promise<void> {
     process.stdout.write(
       "\nWritten. Nothing was published or pushed: review, commit and release as usual.\n",
     );
-  } else if (result.drift)
+  } else if (result.drift) {
     process.stdout.write("\nNothing written. Run again with --yes to apply.\n");
-  else process.stdout.write("\nNothing to change.\n");
+  } else process.stdout.write("\nNothing to change.\n");
 
   if (result.conflicts.length > 0) process.exitCode = EXIT_CODES.failed;
   else if (!result.applied && result.drift) process.exitCode = EXIT_CODES.needsApproval;

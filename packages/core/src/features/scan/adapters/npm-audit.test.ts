@@ -93,4 +93,23 @@ describe("parseNpmAuditJsonFromString", () => {
       severity: "HIGH",
     });
   });
+
+  it("reads a clean report as no findings", () => {
+    expect(parseNpmAuditJsonFromString('{"auditReportVersion":2,"vulnerabilities":{}}')).toEqual(
+      [],
+    );
+  });
+
+  it.each(["{}", "[]", '{"vulnerabilities":"x"}', '{"vulnerabilities":{"a":{"via":[]}}}'])(
+    "rejects %s instead of reporting zero findings",
+    (content) => {
+      expect(() => parseNpmAuditJsonFromString(content, "audit.json")).toThrow(/audit\.json/);
+    },
+  );
+
+  it("names the source when the text is not JSON", () => {
+    expect(() => parseNpmAuditJsonFromString("not json", "audit.json")).toThrow(
+      /audit\.json is not valid JSON/,
+    );
+  });
 });

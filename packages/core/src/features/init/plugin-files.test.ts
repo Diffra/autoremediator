@@ -70,8 +70,9 @@ describe("Claude Code plugin files", () => {
     for (const tool of INSTRUCTED_TOOLS) expect(getOperation(tool)).toBeDefined();
     const referenced = new Set<string>();
     for (const content of Object.values(pluginFiles)) {
-      for (const [, word] of content.matchAll(/`([a-z][A-Za-z]+)`/g))
+      for (const [, word] of content.matchAll(/`([a-z][A-Za-z]+)`/g)) {
         if (word && getOperation(word)) referenced.add(word);
+      }
     }
     for (const word of referenced) expect(INSTRUCTED_TOOLS as readonly string[]).toContain(word);
   });

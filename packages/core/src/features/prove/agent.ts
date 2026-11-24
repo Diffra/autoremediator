@@ -119,8 +119,9 @@ function createTools(task: ReproductionTask, env: ReproductionEnv, state: AgentS
       }),
       execute: async ({ version, path, startLine, endLine }) => {
         const text = source(version).files.get(path);
-        if (text === undefined)
+        if (text === undefined) {
           return `Error: no file "${path}" in the ${version} version (use listFiles)`;
+        }
         const lines = text.split("\n");
         const from = Math.max(1, startLine ?? 1);
         const to = Math.min(
@@ -214,11 +215,13 @@ export function createBuiltinReproductionAgent(model: LanguageModel): Reproducti
         });
         steps = result.steps;
       } catch (error) {
-        failure = env.signal.aborted
-          ? "cancelled"
-          : signal.aborted
-            ? "the time limit was reached"
-            : `the model call failed: ${errorMessage(error)}`;
+        if (env.signal.aborted) {
+          failure = "cancelled";
+        } else if (signal.aborted) {
+          failure = "the time limit was reached";
+        } else {
+          failure = `the model call failed: ${errorMessage(error)}`;
+        }
       }
 
       const usage = [

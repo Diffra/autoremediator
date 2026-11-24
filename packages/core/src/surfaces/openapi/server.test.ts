@@ -241,12 +241,12 @@ describe("openapi server", () => {
           }>((resolve) => {
             const origWriteHead = res.writeHead.bind(res);
             res.writeHead = ((status: number, ...args: any[]) => {
-              const headersObj =
-                typeof args[0] === "object"
-                  ? args[0]
-                  : typeof args[1] === "object"
-                    ? args[1]
-                    : undefined;
+              let headersObj: (typeof args)[number];
+              if (typeof args[0] === "object") {
+                headersObj = args[0];
+              } else if (typeof args[1] === "object") {
+                headersObj = args[1];
+              }
               if (headersObj) {
                 for (const [k, v] of Object.entries(headersObj)) {
                   res.setHeader(k, v as any);

@@ -70,19 +70,6 @@ export interface Evaluation {
   reasons: string[];
 }
 
-export interface Transition {
-  at: string;
-  /** The event that caused it; absent for a change caused by time passing alone. */
-  eventSeq?: number;
-  from: AutonomyLevel;
-  to: AutonomyLevel;
-  direction: "promotion" | "demotion";
-  cause: "event" | "cooldown";
-  reason: string;
-  runIds: string[];
-  eventSeqs: number[];
-}
-
 const pct = (value: number): string => `${Math.round(value * 1000) / 10}%`;
 const isIncident = (event: TrackEvent): boolean =>
   event.type === "rollback" || event.type === "verifier-failure";
@@ -257,11 +244,8 @@ export function evaluate(
   const stats = windowStats(events, config);
   const requirements = requirementsFor(stats, config);
 
-  const fromWindow: AutonomyLevel = meets(requirements.L4)
-    ? "L4"
-    : meets(requirements.L3)
-      ? "L3"
-      : BASE_EARNED_LEVEL;
+  const fromWindow: AutonomyLevel =
+    (["L4", "L3"] as const).find((level) => meets(requirements[level])) ?? BASE_EARNED_LEVEL;
   const cap = capFor(events, config, now.getTime());
   const earned = cap ? minLevel(fromWindow, cap.level) : fromWindow;
 
@@ -294,109 +278,6 @@ export function evaluate(
 /** The level actually in force: the ceiling the policy sets, or less if the record has earned less. */
 export function effectiveLevel(evaluation: Evaluation, config: AutonomyConfig): AutonomyLevel {
   return minLevel(config.ceiling, evaluation.earned);
-}
-
-/**
- * Every promotion and demotion, replayed from the first event: each cites the event that caused it,
- * or says it came from a cooldown ending. `now` closes the replay, so a cooldown that ended since
- * the last event is shown too.
- */
-export function transitionsOf(
-  events: readonly TrackEvent[],
-  config: AutonomyConfig,
-  now: Date,
-): Transition[] {
-  const ordered = events.toSorted((a, b) => a.seq - b.seq);
-  const out: Transition[] = [];
-  let level: AutonomyLevel = BASE_EARNED_LEVEL;
-
-  const push = (transition: Omit<Transition, "direction">) => {
-    out.push({
-      ...transition,
-      direction: levelIndex(transition.to) > levelIndex(transition.from) ? "promotion" : "demotion",
-    });
-  };
-
-  const describe = (before: Evaluation, after: Evaluation, cause: "event" | "cooldown") => {
-    const from = before.earned;
-    const to = after.earned;
-    if (levelIndex(to) < levelIndex(from)) {
-      if (
-        after.cap &&
-        (!before.cap || levelIndex(after.cap.level) < levelIndex(before.cap.level))
-      ) {
-        return {
-          reason: after.cap.reason,
-          runIds: after.cap.runIds,
-          eventSeqs: after.cap.eventSeqs,
-        };
-      }
-      const lost = from === "L4" ? after.requirements.L4 : after.requirements.L3;
-      const unmet = lost.filter((requirement) => !requirement.met);
-      return {
-        reason: `No longer meets ${from}: ${unmet.map((requirement) => `${requirement.name}: ${requirement.required} (now ${requirement.actual})`).join("; ")}`,
-        runIds: [] as string[],
-        eventSeqs: [] as number[],
-      };
-    }
-    if (cause === "cooldown" && before.cap) {
-      return {
-        reason: `The ${before.cap.level} cap ended: no rollback or verifier failure within ${config.cooldownDays} day(s)`,
-        runIds: before.cap.runIds,
-        eventSeqs: before.cap.eventSeqs,
-      };
-    }
-    const gained = to === "L4" ? after.requirements.L4 : after.requirements.L3;
-    return {
-      reason: `Met every requirement for ${to}: ${gained.map((requirement) => `${requirement.name}: ${requirement.actual}`).join("; ")}`,
-      runIds: [],
-      eventSeqs: [],
-    };
-  };
-
-  let previous = evaluate([], config, new Date(0));
-  for (const [index, event] of ordered.entries()) {
-    const at = new Date(event.at);
-    const prior = ordered.slice(0, index);
-    // Time passing since the last event can already have ended a cooldown.
-    const quiet = evaluate(prior, config, at);
-    if (quiet.earned !== level) {
-      push({
-        at: event.at,
-        from: level,
-        to: quiet.earned,
-        cause: "cooldown",
-        ...describe(previous, quiet, "cooldown"),
-      });
-      level = quiet.earned;
-      previous = quiet;
-    }
-    const after = evaluate([...prior, event], config, at);
-    if (after.earned !== level) {
-      push({
-        at: event.at,
-        eventSeq: event.seq,
-        from: level,
-        to: after.earned,
-        cause: "event",
-        ...describe(quiet, after, "event"),
-      });
-      level = after.earned;
-    }
-    previous = after;
-  }
-
-  const final = evaluate(ordered, config, now);
-  if (final.earned !== level) {
-    push({
-      at: now.toISOString(),
-      from: level,
-      to: final.earned,
-      cause: "cooldown",
-      ...describe(previous, final, "cooldown"),
-    });
-  }
-  return out;
 }
 
 /** What the next level up needs, or why it cannot be reached. */
@@ -482,12 +363,17 @@ export function signalsFor(level: AutonomyLevel, facts: OutcomeFacts): LevelSign
   return {
     autoMergeEligible: clean,
     escalate: !clean || facts.anyMajorBump,
-    note: clean
-      ? facts.anyMajorBump
-        ? "L4: verified, but a major version bump is escalated to a person"
-        : "L4: every change was verified"
-      : "L4: the run was not fully applied and verified, so it is escalated to a person",
+    note: fullAutonomyNote(clean, facts.anyMajorBump),
   };
+}
+
+function fullAutonomyNote(clean: boolean, anyMajorBump: boolean): string {
+  if (!clean) {
+    return "L4: the run was not fully applied and verified, so it is escalated to a person";
+  }
+  return anyMajorBump
+    ? "L4: verified, but a major version bump is escalated to a person"
+    : "L4: every change was verified";
 }
 
 export const allows = (level: AutonomyLevel) => LEVEL_ALLOWS[level];

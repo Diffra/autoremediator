@@ -12,13 +12,22 @@ import { sha256 } from "../../shared/hash.js";
 import { renderDiff } from "../init/diff.js";
 import { resolveLanguageModel } from "../patch/model.js";
 import { applyPatch, PolicyPatchError } from "./apply-patch.js";
+import {
+  describeExplanations,
+  inventedSuppressions,
+  loosenRefusals,
+  looseningVeto,
+  parseProposal,
+  quoteExplanations,
+  unaccountedClauses,
+  unexplainedChanges,
+} from "./compile-checks.js";
 import { describePolicy } from "./explain.js";
 import { findLoosenings, type Loosening } from "./policy-loosening.js";
 import { buildPolicyPrompt, POLICY_SYSTEM_PROMPT } from "./prompt.js";
 import { policySchemas, type PolicyProposal } from "./proposal.js";
-import { clausesOf, findPhrase, indexRequest, isNegated, tokensOf } from "./request-match.js";
+import { findPhrase, indexRequest } from "./request-match.js";
 import { PolicyRequestError, sanitizeRequest } from "./sanitize.js";
-import { hasVocabulary, mentionsKey } from "./vocabulary.js";
 
 export const DEFAULT_POLICY_PATH = join(".github", "autoremediator.yml");
 
@@ -131,10 +140,6 @@ const usesCrlf = (text: string | undefined): boolean =>
   text !== undefined &&
   (text.match(/\r\n/g)?.length ?? 0) > (text.match(/(?<!\r)\n/g)?.length ?? 0);
 
-/** CVE and GHSA ids as they appear in running text (lower-cased). */
-const ADVISORY_ID_IN_TEXT =
-  /(?<![\w-])(?:cve-\d{4}-\d{4,}|ghsa(?:-[23456789cfghjmpqrvwx]{4}){3})(?![\w-])/g;
-
 /** Dotted paths whose value differs between two parsed policy files. Arrays are compared whole. */
 export function changedPaths(before: unknown, after: unknown, prefix = ""): string[] {
   if (isRecord(before) && isRecord(after)) {
@@ -147,9 +152,6 @@ export function changedPaths(before: unknown, after: unknown, prefix = ""): stri
 }
 
 /** An explained key covers a change at, under, or (when a whole section is new) above it. */
-const covers = (key: string, path: string): boolean =>
-  path === key || path.startsWith(`${key}.`) || key.startsWith(`${path}.`);
-
 function parseRaw(text: string | undefined): Record<string, unknown> {
   const parsed: unknown = text === undefined ? {} : (yamlParse(text) ?? {});
   return typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)
@@ -197,12 +199,7 @@ export async function compilePolicy(
 ): Promise<PolicyCompileResult> {
   const request = sanitizeRequest(requestText);
   const cwd = resolve(options.cwd ?? process.cwd());
-  const requested = options.policy?.trim() ? options.policy : DEFAULT_POLICY_PATH;
-  if (/^(?:\{|---)/.test(requested.trim())) {
-    throw new PolicyRequestError("Compiling needs a policy file path, not inline policy text.");
-  }
-  const target = resolve(cwd, requested);
-  const path = relative(cwd, target) || requested;
+  const { target, path } = policyTarget(cwd, options.policy);
   const now = options.now ?? new Date();
 
   const before = existsSync(target) ? readFileSync(target, "utf8") : undefined;
@@ -210,21 +207,7 @@ export async function compilePolicy(
   const oldPolicy = loadPolicy(cwd, before === undefined ? undefined : target);
   const oldRaw = parseRaw(before);
 
-  const result: PolicyCompileResult = {
-    status: "rejected",
-    path,
-    request,
-    base: fingerprint(before),
-    changed: false,
-    applied: false,
-    diff: "",
-    explanations: [],
-    unsupported: [],
-    loosenings: [],
-    rejections: [],
-    warnings: [],
-    sentences: describePolicy(oldPolicy).map((rule) => rule.sentence),
-  };
+  const result = startResult({ path, request, before, oldPolicy });
   const reject = (...reasons: string[]): PolicyCompileResult => {
     result.status = "rejected";
     result.rejections.push(...reasons);
@@ -249,177 +232,61 @@ export async function compilePolicy(
     throw error;
   }
 
-  const { proposal: proposalSchema, keys: allowedKeys } = policySchemas();
-  const parsed = proposalSchema.safeParse(answer);
-  if (!parsed.success) {
-    const issues = parsed.error.issues.map((issue) => {
-      const where = issue.path.length > 0 ? issue.path.join(".") : "(root)";
-      return issue.code === "unrecognized_keys"
-        ? `${where}: key(s) outside the allowlist: ${issue.keys.join(", ")}`
-        : `${where}: ${issue.message}`;
-    });
-    return reject(
-      `The model's answer is not a valid policy patch (allowed keys: ${allowedKeys.join(", ")}).`,
-      ...issues,
-    );
-  }
-  const proposal: PolicyProposal = parsed.data;
+  const parsed = parseProposal(answer);
+  if ("rejections" in parsed) return reject(...parsed.rejections);
+  const { proposal, allowedKeys } = parsed;
 
   // A phrase the model quotes must be in the request, word for word and in order, and must be about
   // the keys it claims to explain.
   const index = indexRequest(request);
-  const quotedExplanations: { phrase: string; keys: string[] }[] = [];
-  for (const entry of proposal.explanations) {
-    for (const key of entry.keys) {
-      if (!allowedKeys.includes(key.split(".")[0] ?? "") || !hasVocabulary(key)) {
-        return reject(`The model explains a key outside the allowlist: "${key}".`);
-      }
-    }
-    if (findPhrase(index, entry.phrase).length === 0) {
-      result.warnings.push(
-        `Ignored an explanation quoting words that are not in the request, in that order: "${entry.phrase.slice(0, 80)}".`,
-      );
-      continue;
-    }
-    const keys = entry.keys.filter((key) => mentionsKey(key, "related", entry.phrase));
-    const unrelated = entry.keys.filter((key) => !keys.includes(key));
-    if (unrelated.length > 0) {
-      result.warnings.push(
-        `Ignored "${entry.phrase.slice(0, 80)}" as the explanation for ${unrelated.join(", ")}: the words say nothing about it.`,
-      );
-    }
-    if (keys.length > 0) quotedExplanations.push({ phrase: entry.phrase, keys });
-  }
+  const quoting = quoteExplanations(proposal, index, allowedKeys, result.warnings);
+  if ("rejection" in quoting) return reject(quoting.rejection);
+  const quotedExplanations = quoting.quoted;
   const quotedUnsupported = proposal.unsupported.filter(
     (entry) => findPhrase(index, entry.phrase).length > 0,
   );
   result.unsupported = quotedUnsupported.map(({ phrase, reason }) => ({ phrase, reason }));
 
-  // A suppression is for an advisory the request names, spelled out: never one the model chose.
-  const requestIds = new Set(request.toLowerCase().match(ADVISORY_ID_IN_TEXT) ?? []);
-  const invented = (proposal.patch.suppressions ?? [])
-    .map((entry) => entry.cveId)
-    .filter((id) => !requestIds.has(id.toLowerCase()));
+  const invented = inventedSuppressions(proposal, request);
   if (invented.length > 0) {
     return reject(`The model suppresses ${invented.join(", ")}, which the request does not name.`);
   }
 
-  // Apply the patch to the YAML text.
-  let proposed: string;
-  let policy: AutoremediatorPolicy;
-  try {
-    const applied = applyPatch(before, proposal.patch, { now });
-    // The YAML library writes LF; give the file back the line endings it had.
-    proposed = usesCrlf(before) ? applied.text.replaceAll(/\r?\n/g, "\r\n") : applied.text;
-    policy = validatedPolicy(cwd, proposed);
-    const again = applyPatch(proposed, proposal.patch, { now });
-    if (again.edits !== 0) {
-      return reject("Applying the patch twice gives a different file, so it was refused.");
-    }
-  } catch (error) {
-    if (
-      error instanceof PolicyPatchError ||
-      (error instanceof Error && error.message.startsWith("Invalid policy"))
-    ) {
-      return reject(error.message);
-    }
-    throw error;
-  }
-  result.proposed = proposed;
-  result.changed = proposed !== (before ?? "");
-  // The diff is line-based, so it compares LF text whatever the file's own line endings are.
-  result.diff = result.changed ? renderDiff(path, lf(before), lf(proposed) ?? "") : "";
-  result.sentences = describePolicy(policy).map((rule) => rule.sentence);
+  const applied = proposeFile(before, proposal, cwd, now);
+  if ("rejection" in applied) return reject(applied.rejection);
+  const { proposed, policy } = applied;
+  recordProposal(result, { proposed, before, path, policy });
 
   // Every change must be explained by words of the request that are about it.
   const newRaw = parseRaw(proposed);
   const changed = changedPaths(oldRaw, newRaw);
-  const stray = changed.filter(
-    (changedPath) => !allowedKeys.includes(changedPath.split(".")[0] ?? ""),
-  );
+  const stray = changed.filter((changedPath) => !isAllowedPath(changedPath, allowedKeys));
   if (stray.length > 0) {
     return reject(`The change touches keys outside the allowlist: ${stray.join(", ")}.`);
   }
   // Loosening: what the proposal makes less safe, found by comparing the two policies.
   const loosenings = findLoosenings(oldPolicy, policy);
   result.loosenings = loosenings;
-  const unexplained = changed.filter(
-    (changedPath) =>
-      !quotedExplanations.some((entry) => entry.keys.some((key) => covers(key, changedPath))) &&
-      // A loosening is refused with its own reason below.
-      !loosenings.some((entry) => covers(entry.key, changedPath)),
-  );
+  const unexplained = unexplainedChanges(changed, quotedExplanations, loosenings);
   if (unexplained.length > 0) {
     return reject(
       `The model changed ${unexplained.join(", ")} without quoting the words of the request that ask for it.`,
     );
   }
-  result.explanations = quotedExplanations.map((entry) => ({
-    phrase: entry.phrase,
-    keys: entry.keys,
-    effect: changed.some((changedPath) => entry.keys.some((key) => covers(key, changedPath)))
-      ? "changes"
-      : "already-in-place",
-  }));
+  result.explanations = describeExplanations(quotedExplanations, changed);
 
-  // Rules the model neither expressed nor reported as unsupported are surfaced, never dropped silently.
-  const mentioned = new Set(
-    [
-      ...quotedExplanations.map((entry) => entry.phrase),
-      ...quotedUnsupported.map((entry) => entry.phrase),
-    ].flatMap((phrase) => tokensOf(phrase)),
-  );
-  for (const clause of clausesOf(request)) {
-    const tokens = tokensOf(clause);
-    const hit = tokens.filter((token) => mentioned.has(token)).length;
-    if (hit / tokens.length < 0.7) {
-      result.unsupported.push({
-        phrase: clause,
-        reason:
-          "The model's answer does not account for these words, so nothing was changed for them.",
-      });
-    }
-  }
+  result.unsupported.push(...unaccountedClauses(request, quotedExplanations, quotedUnsupported));
 
   // A loosening must be asked for in so many words: a quoted phrase that is about that very key, says
   // so in loosening terms, and is not negated by the request ("never allow major bumps").
-  const refusals: string[] = [];
-  for (const entry of loosenings) {
-    const asking = quotedExplanations.filter(
-      (explanation) =>
-        explanation.keys.some((key) => covers(key, entry.key)) &&
-        mentionsKey(entry.key, "loosen", explanation.phrase),
-    );
-    if (asking.length === 0) {
-      refusals.push(
-        `Refused: ${entry.description} (${entry.key}) The request does not ask for it.`,
-      );
-      continue;
-    }
-    const positive = asking.some((explanation) =>
-      findPhrase(index, explanation.phrase).some(
-        (start) => !isNegated(index, start, tokensOf(explanation.phrase).length),
-      ),
-    );
-    if (!positive) {
-      refusals.push(
-        `Refused: ${entry.description} (${entry.key}) The request says the opposite: "${asking[0]?.phrase.slice(0, 80)}" is negated there.`,
-      );
-    }
-  }
+  const refusals = loosenRefusals(loosenings, quotedExplanations, index);
   if (refusals.length > 0) return reject(...refusals);
   if (loosenings.length > 0 && options.allowLoosening !== true) {
-    return reject(
-      `The proposal makes the policy less safe in ${loosenings.length} way(s); review them and run again with allowLoosening (--allow-loosening) if you mean it.`,
-      ...loosenings.map((entry) => `${entry.key}: ${entry.description}`),
-    );
+    return reject(...looseningVeto(loosenings));
   }
 
-  if (!result.changed) {
-    result.status = "unchanged";
-    return result;
-  }
-  result.status = "proposed";
+  result.status = result.changed ? "proposed" : "unchanged";
+  if (!result.changed) return result;
 
   if (options.apply === true) writePolicyProposal(result, { cwd });
   return result;
@@ -448,4 +315,87 @@ export function writePolicyProposal(
   result.status = "applied";
   result.applied = true;
   return result;
+}
+
+function startResult(input: {
+  path: string;
+  request: string;
+  before: string | undefined;
+  oldPolicy: AutoremediatorPolicy;
+}): PolicyCompileResult {
+  const { path, request, before, oldPolicy } = input;
+  return {
+    status: "rejected",
+    path,
+    request,
+    base: fingerprint(before),
+    changed: false,
+    applied: false,
+    diff: "",
+    explanations: [],
+    unsupported: [],
+    loosenings: [],
+    rejections: [],
+    warnings: [],
+    sentences: describePolicy(oldPolicy).map((rule) => rule.sentence),
+  };
+}
+
+/** The proposed file text and the policy it loads as, or why the patch was refused. */
+function proposeFile(
+  before: string | undefined,
+  proposal: PolicyProposal,
+  cwd: string,
+  now: Date,
+): { proposed: string; policy: AutoremediatorPolicy } | { rejection: string } {
+  try {
+    const first = applyPatch(before, proposal.patch, { now });
+    // The YAML library writes LF; give the file back the line endings it had.
+    const proposed = usesCrlf(before) ? first.text.replaceAll(/\r?\n/g, "\r\n") : first.text;
+    const policy = validatedPolicy(cwd, proposed);
+    const again = applyPatch(proposed, proposal.patch, { now });
+    if (again.edits !== 0) {
+      return { rejection: "Applying the patch twice gives a different file, so it was refused." };
+    }
+    return { proposed, policy };
+  } catch (error) {
+    if (
+      error instanceof PolicyPatchError ||
+      (error instanceof Error && error.message.startsWith("Invalid policy"))
+    ) {
+      return { rejection: error.message };
+    }
+    throw error;
+  }
+}
+
+function policyTarget(cwd: string, policy: string | undefined): { target: string; path: string } {
+  const requested = policy?.trim() ? policy : DEFAULT_POLICY_PATH;
+  if (/^(?:\{|---)/.test(requested.trim())) {
+    throw new PolicyRequestError("Compiling needs a policy file path, not inline policy text.");
+  }
+  const target = resolve(cwd, requested);
+  return { target, path: relative(cwd, target) || requested };
+}
+
+function isAllowedPath(changedPath: string, allowedKeys: readonly string[]): boolean {
+  return allowedKeys.includes(changedPath.split(".")[0] ?? "");
+}
+
+/** Records the proposed text, whether it differs from the file, its diff and the policy in words. */
+function recordProposal(
+  result: PolicyCompileResult,
+  input: {
+    proposed: string;
+    before: string | undefined;
+    path: string;
+    policy: AutoremediatorPolicy;
+  },
+): void {
+  const { proposed, before, path, policy } = input;
+  result.proposed = proposed;
+  result.changed = proposed !== (before ?? "");
+  // The diff is line-based, so it compares LF text whatever the file's own line endings are.
+  result.diff = result.changed ? renderDiff(path, lf(before), lf(proposed) ?? "") : "";
+  result.sentences = describePolicy(policy).map((rule) => rule.sentence);
 }

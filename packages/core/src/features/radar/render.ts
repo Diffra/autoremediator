@@ -10,8 +10,9 @@ function flagLines(entry: RadarEntry): string[] {
         flag.occurrences > 1 ? `, ${flag.occurrences} places` : ""
       })\n       ${flag.evidence}`,
   );
-  if (entry.flags.length > shown.length)
+  if (entry.flags.length > shown.length) {
     lines.push(`     ... and ${entry.flags.length - shown.length} more signal(s)`);
+  }
   return lines;
 }
 
@@ -28,19 +29,20 @@ export function renderRadar(report: RadarReport): string {
     );
   }
   for (const [index, entry] of report.entries.entries()) {
-    const tag =
-      entry.status === "now-advisory"
-        ? `advisory now exists: ${entry.advisories.map((advisory) => advisory.id).join(", ")}`
-        : entry.status === "unchecked"
-          ? "advisories unchecked"
-          : "no published advisory";
+    let tag = "no published advisory";
+    if (entry.status === "now-advisory") {
+      tag = `advisory now exists: ${entry.advisories.map((advisory) => advisory.id).join(", ")}`;
+    } else if (entry.status === "unchecked") {
+      tag = "advisories unchecked";
+    }
     lines.push(
       `${index + 1}. ${entry.name} ${entry.installed} -> ${entry.target} (${entry.upgrade}${entry.direct ? "" : ", transitive"})  ${entry.confidence}  score ${entry.score}  [${tag}]`,
       `   ${entry.statement}`,
       ...flagLines(entry),
     );
-    if (entry.impact)
+    if (entry.impact) {
       lines.push(`   upgrade impact: ${entry.impact.rating} - ${entry.impact.summary}`);
+    }
     for (const note of entry.notes) lines.push(`   note: ${note}`);
     lines.push("");
   }

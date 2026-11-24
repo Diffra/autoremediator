@@ -33,11 +33,7 @@ export function breakingFrom(
       for (const diagnostic of parseCompilerDiagnostics(failure.details.join("\n"))) {
         const symbol = diagnostic.missingMember ?? diagnostic.suggestedSymbol;
         add({
-          kind: diagnostic.missingMember
-            ? "symbol-removed"
-            : diagnostic.code
-              ? `diagnostic-${diagnostic.code}`
-              : "diagnostic",
+          kind: breakingKindOf(diagnostic),
           ...(symbol ? { symbol: symbol.slice(0, 200) } : {}),
           message: diagnostic.message.slice(0, 300),
         });
@@ -88,10 +84,11 @@ export function recipeFromAttempt(
 ): { recipe: Recipe; skipped: { file: string; reason: string }[] } | { error: string } {
   const fromRange = input.fromRange ?? rangeAround(input.fromVersion);
   const toRange = input.toRange ?? rangeAround(input.toVersion);
-  if (!fromRange || !toRange)
+  if (!fromRange || !toRange) {
     return {
       error: `cannot make a version range from ${input.fromVersion} and ${input.toVersion}`,
     };
+  }
   try {
     return captureRecipe({
       diff: input.diff,
@@ -140,4 +137,11 @@ export function hasRecipeFor(
   } catch {
     return false;
   }
+}
+
+function breakingKindOf(diagnostic: { missingMember?: string; code?: string | number }): string {
+  if (diagnostic.missingMember) {
+    return "symbol-removed";
+  }
+  return diagnostic.code ? `diagnostic-${diagnostic.code}` : "diagnostic";
 }

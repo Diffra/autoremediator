@@ -47,3 +47,20 @@ export class DataFormatError extends AutoremediatorError {
     super("data-format", message, options);
   }
 }
+
+/**
+ * A service we depend on for an answer (an advisory database, a registry) could not give one.
+ * Callers must not read this as "nothing found": a missing answer is not a clean answer.
+ */
+export class UpstreamError extends AutoremediatorError {
+  constructor(message: string, options: AutoremediatorErrorOptions = {}) {
+    super("upstream-unavailable", message, options);
+  }
+}
+
+/** A rollback left the project different from how it started; the message lists what was not restored. */
+export class RollbackError extends AutoremediatorError {
+  constructor(message: string, options: AutoremediatorErrorOptions = {}) {
+    super("rollback-failed", message, options);
+  }
+}

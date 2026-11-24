@@ -142,12 +142,7 @@ export function entryPoints(source: PackageSource): EntryPoint[] {
         runtimeLeaf && !/\.d\.[cm]?ts$/.test(runtimeLeaf)
           ? resolveExisting(files, runtimeLeaf)
           : undefined;
-      const manifestTypes =
-        typeof manifest.types === "string"
-          ? manifest.types
-          : typeof manifest.typings === "string"
-            ? manifest.typings
-            : undefined;
+      const manifestTypes = typesFieldOf(manifest);
       entries.push({
         subpath,
         file,
@@ -166,12 +161,7 @@ export function entryPoints(source: PackageSource): EntryPoint[] {
     (main ? resolveExisting(files, main) : undefined) ??
     (moduleField ? resolveExisting(files, moduleField) : undefined) ??
     resolveExisting(files, "index");
-  const typesField =
-    typeof manifest.types === "string"
-      ? manifest.types
-      : typeof manifest.typings === "string"
-        ? manifest.typings
-        : undefined;
+  const typesField = typesFieldOf(manifest);
   const typesFile =
     (typesField ? resolveExisting(files, typesField) : undefined) ??
     (file ? declarationFor(files, file) : undefined) ??
@@ -323,4 +313,11 @@ export class PackageIndex {
     this.resolved.set(path, result);
     return result;
   }
+}
+
+function typesFieldOf(manifest: Record<string, unknown>): string | undefined {
+  if (typeof manifest.types === "string") {
+    return manifest.types;
+  }
+  return typeof manifest.typings === "string" ? manifest.typings : undefined;
 }

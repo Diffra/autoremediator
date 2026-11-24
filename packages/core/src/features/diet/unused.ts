@@ -1,111 +1,7 @@
-import { existsSync, readFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
-
 import { toRootPackageName } from "../reachability/check-reachability.js";
+import { binNames, readInstalledManifest, SECTIONS, type Manifest } from "./manifest.js";
 import type { PackageUsage } from "./scan.js";
 import type { DependencySection, UnusedDependency } from "./types.js";
-
-export interface Manifest {
-  name?: string;
-  version?: string;
-  private?: boolean;
-  engines?: unknown;
-  scripts?: Record<string, string>;
-  dependencies?: Record<string, string>;
-  devDependencies?: Record<string, string>;
-  optionalDependencies?: Record<string, string>;
-  peerDependencies?: Record<string, string>;
-  peerDependenciesMeta?: Record<string, { optional?: boolean }>;
-  bin?: string | Record<string, string>;
-  bundledDependencies?: string[];
-  bundleDependencies?: string[];
-  [key: string]: unknown;
-}
-
-export const SECTIONS: readonly DependencySection[] = [
-  "dependencies",
-  "devDependencies",
-  "optionalDependencies",
-];
-
-/** Manifest fields that describe the package rather than configure a tool. */
-const STRUCTURAL_FIELDS = new Set([
-  "name",
-  "version",
-  "description",
-  "keywords",
-  "homepage",
-  "bugs",
-  "license",
-  "author",
-  "contributors",
-  "funding",
-  "repository",
-  "dependencies",
-  "devDependencies",
-  "optionalDependencies",
-  "peerDependencies",
-  "peerDependenciesMeta",
-  "bundledDependencies",
-  "bundleDependencies",
-  "dependenciesMeta",
-  "overrides",
-  "resolutions",
-  "pnpm",
-  "scripts",
-  "files",
-  "publishConfig",
-]);
-
-/** The manifest fields a tool reads its configuration from (`eslintConfig`, `jest`, `babel`, ...). */
-export function manifestConfigText(manifest: Manifest): string {
-  const config: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(manifest))
-    if (!STRUCTURAL_FIELDS.has(key)) config[key] = value;
-  return JSON.stringify(config);
-}
-
-/** `Manifest.scripts` as one text per script, labelled for evidence. */
-export function scriptTexts(manifest: Manifest): [label: string, text: string][] {
-  return Object.entries(manifest.scripts ?? {}).map(([name, text]) => [
-    `package.json#scripts.${name}`,
-    text,
-  ]);
-}
-
-export function readManifest(file: string): Manifest | undefined {
-  try {
-    const parsed: unknown = JSON.parse(readFileSync(file, "utf8"));
-    return typeof parsed === "object" && parsed !== null ? (parsed as Manifest) : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-/** `node_modules/<name>/package.json`, looked up the way Node resolves it: here, then each parent. */
-export function readInstalledManifest(
-  packageDir: string,
-  name: string,
-  stopAt: string,
-): Manifest | undefined {
-  let directory = resolve(packageDir);
-  const limit = resolve(stopAt);
-  for (;;) {
-    const file = join(directory, "node_modules", name, "package.json");
-    if (existsSync(file)) return readManifest(file);
-    if (directory === limit) return undefined;
-    const parent = dirname(directory);
-    if (parent === directory) return undefined;
-    directory = parent;
-  }
-}
-
-/** Command names a package installs, from its `bin` field. */
-export function binNames(manifest: Manifest, packageName: string): string[] {
-  const bin = manifest.bin;
-  if (typeof bin === "string") return [packageName.split("/").at(-1) ?? packageName];
-  return bin && typeof bin === "object" ? Object.keys(bin) : [];
-}
 
 /**
  * Names a token in a config file, CI file or script can stand for. ESLint, Babel, Prettier and
@@ -134,8 +30,9 @@ export function candidatePackages(token: string): string[] {
       names.add(`${scope}/eslint-plugin`);
       names.add(`${scope}/eslint-config`);
     } else if (scope) {
-      for (const suffix of ["eslint-plugin", "eslint-config", "babel-preset", "prettier-config"])
+      for (const suffix of ["eslint-plugin", "eslint-config", "babel-preset", "prettier-config"]) {
         names.add(`${scope}/${suffix}`);
+      }
     }
   } else {
     for (const prefix of [
@@ -169,8 +66,9 @@ export interface TokenIndex {
 export function indexTokens(tokens: ReadonlyMap<string, string>): TokenIndex {
   const candidates = new Map<string, string>();
   for (const [token, where] of tokens) {
-    for (const name of candidatePackages(token))
+    for (const name of candidatePackages(token)) {
       if (!candidates.has(name)) candidates.set(name, where);
+    }
   }
   return { candidates, raw: tokens };
 }
@@ -211,7 +109,7 @@ const BASE_REASON =
  * checked and none applies, probably when something the scan cannot see remains possible.
  */
 export function classifyDependencies(context: ClassifyContext): Classified {
-  const { manifest, usage, index } = context;
+  const { manifest, usage } = context;
 
   const declared: { name: string; section: DependencySection; range: string }[] = [];
   for (const section of SECTIONS) {
@@ -251,19 +149,6 @@ export function classifyDependencies(context: ClassifyContext): Classified {
   const pending: { entry: (typeof declared)[number]; reasons: string[] }[] = [];
   const typeEntries: { entry: (typeof declared)[number]; target: string }[] = [];
 
-  const indirect = (
-    entry: (typeof declared)[number],
-    reason: string,
-    evidence?: string[],
-  ): UnusedDependency => ({
-    name: entry.name,
-    section: entry.section,
-    range: entry.range,
-    classification: "used-indirectly",
-    reason,
-    ...(evidence ? { evidence } : {}),
-  });
-
   for (const entry of declared) {
     const { name } = entry;
     const reference = usage.references.get(name);
@@ -276,7 +161,7 @@ export function classifyDependencies(context: ClassifyContext): Classified {
     const typesFor = typesNeeded(name);
     if (typesFor === "node" && (context.hasTypeScript || context.hasTsconfig)) {
       unused.push(
-        indirect(
+        indirectEntry(
           entry,
           "Node's global and built-in types, which any TypeScript source here relies on",
         ),
@@ -288,128 +173,16 @@ export function classifyDependencies(context: ClassifyContext): Classified {
       continue;
     }
 
-    // 2. TypeScript with a tsconfig is driven by the compiler, editors and bundlers.
-    if (name === "typescript" && context.hasTsconfig) {
-      unused.push(
-        indirect(
-          entry,
-          "a tsconfig.json is present, and editors and build tools load TypeScript itself",
-        ),
-      );
-      continue;
-    }
-
-    // 3. Named by a script, a config file, a CI workflow or a manifest tool section.
-    const configured = index.candidates.get(name);
-    if (configured) {
-      unused.push(indirect(entry, "named by tool configuration or a script", [configured]));
-      continue;
-    }
-
-    // 4. One of its commands is run.
-    const installedManifest = installed.get(name);
-    const commands = installedManifest ? binNames(installedManifest, name) : [];
-    const usedCommand = commands.find((command) => index.raw.has(command));
-    if (usedCommand) {
-      unused.push(
-        indirect(entry, `its command "${usedCommand}" is run`, [index.raw.get(usedCommand)!]),
-      );
-      continue;
-    }
-
-    // 5. Another declared dependency lists it as a peer (an optional peer is loaded when present).
-    const peerFor = peerOf.get(name);
-    if (peerFor) {
-      unused.push(
-        indirect(
-          entry,
-          `a${peerFor.optional ? "n optional" : ""} peer dependency of ${peerFor.dependent}${peerFor.optional ? ", which uses it when installed" : ""}`,
-        ),
-      );
-      continue;
-    }
-
-    // 6. Declared again as this package's own peer: the development copy.
-    if (manifest.peerDependencies?.[name]) {
-      unused.push(
-        indirect(
-          entry,
-          "also declared as a peer dependency (the development copy used to build and test against)",
-        ),
-      );
-      continue;
-    }
-
-    // 7. Named as a string: a mock, a dynamic specifier, a plugin list in a script file.
-    const mention = usage.mentions.get(name);
-    if (mention) {
-      unused.push(
-        indirect(
-          entry,
-          "named in a string rather than imported (a mock path, plugin list or dynamic specifier)",
-          mention,
-        ),
-      );
-      continue;
-    }
-
-    // 8. Used by another package of the workspace, for dependencies declared at the root.
-    const consumer = context.elsewhere?.find(
-      (other) =>
-        other.usage.references.has(name) ||
-        other.usage.mentions.has(name) ||
-        other.index.candidates.has(name) ||
-        commands.some((command) => other.index.raw.has(command)),
-    );
-    if (consumer) {
-      unused.push(indirect(entry, `used by the workspace package ${consumer.packageName}`));
-      continue;
-    }
-
-    if (bundled.has(name)) {
-      unused.push(indirect(entry, "listed in bundledDependencies, so it ships with the package"));
+    const indirectUseFound = indirectUse(entry, { context, installed, peerOf, bundled });
+    if (indirectUseFound) {
+      unused.push(indirectUseFound);
       continue;
     }
 
     // Nothing found. How sure is that?
-    const reasons: string[] = [];
-    if (entry.section === "optionalDependencies") {
-      reasons.push(
-        "an optional dependency, usually a platform-specific or conditionally loaded package",
-      );
-    }
-    if (installedManifest === undefined) {
-      reasons.push("not installed here, so its commands and peer links could not be read");
-    }
-    if (commands.length > 0) {
-      reasons.push(
-        `provides the command${commands.length > 1 ? "s" : ""} ${commands.map((command) => `"${command}"`).join(", ")}, which no script, config or workflow here runs (it may be run by hand or from outside the repository)`,
-      );
-    }
-    if (PLUGIN_STYLE.test(name)) {
-      reasons.push(
-        "a plugin, preset, loader or config package, which tools load by name from configuration the scan did not find it in",
-      );
-    }
-    if (typesFor === "node") {
-      reasons.push("Node's types, but no TypeScript file or tsconfig was found");
-    }
-    if (usage.dynamicLoadFiles.length > 0) {
-      reasons.push(
-        `${usage.dynamicLoadFiles.length} file(s) load modules by a name only known at runtime, which could load it`,
-      );
-    }
-    if (usage.unparsedFiles.length > 0) {
-      reasons.push(
-        `${usage.unparsedFiles.length} file(s) could not be fully read, and might import it`,
-      );
-    }
-    const sourceInWorkspace =
-      usage.sourceFiles > 0 ||
-      (context.elsewhere ?? []).some((other) => other.usage.sourceFiles > 0);
-    if (!sourceInWorkspace) {
-      reasons.push("no source files were found, so usage cannot be judged");
-    }
+    const installedManifest = installed.get(name);
+    const commands = installedManifest ? binNames(installedManifest, name) : [];
+    const reasons = uncertaintyReasons(entry, context, installedManifest, commands, typesFor);
     pending.push({ entry, reasons });
   }
 
@@ -423,7 +196,169 @@ export function classifyDependencies(context: ClassifyContext): Classified {
     });
   }
 
-  // `@types/x` follows `x`: used if x is, unused if x is, unknown if x is not here at all.
+  unused.push(...classifyTypePackages(typeEntries, unused, used, context));
+
+  unused.sort((left, right) => left.name.localeCompare(right.name));
+  return { used, unused, dependenciesInstalled };
+}
+
+type DeclaredEntry = { name: string; section: DependencySection; range: string };
+
+function indirectEntry(
+  entry: DeclaredEntry,
+  reason: string,
+  evidence?: string[],
+): UnusedDependency {
+  return {
+    name: entry.name,
+    section: entry.section,
+    range: entry.range,
+    classification: "used-indirectly",
+    reason,
+    ...(evidence ? { evidence } : {}),
+  };
+}
+
+interface IndirectLookups {
+  context: ClassifyContext;
+  installed: Map<string, Manifest | undefined>;
+  peerOf: Map<string, { dependent: string; optional: boolean }>;
+  bundled: Set<string>;
+}
+
+/** Why a dependency nothing imports is still used: a tool, a script, a peer link, another package. */
+function indirectUse(entry: DeclaredEntry, lookups: IndirectLookups): UnusedDependency | undefined {
+  const { context, installed, peerOf, bundled } = lookups;
+  const { manifest, usage, index } = context;
+  const { name } = entry;
+  // 2. TypeScript with a tsconfig is driven by the compiler, editors and bundlers.
+  if (name === "typescript" && context.hasTsconfig) {
+    return indirectEntry(
+      entry,
+      "a tsconfig.json is present, and editors and build tools load TypeScript itself",
+    );
+  }
+
+  // 3. Named by a script, a config file, a CI workflow or a manifest tool section.
+  const configured = index.candidates.get(name);
+  if (configured) {
+    return indirectEntry(entry, "named by tool configuration or a script", [configured]);
+  }
+
+  // 4. One of its commands is run.
+  const installedManifest = installed.get(name);
+  const commands = installedManifest ? binNames(installedManifest, name) : [];
+  const usedCommand = commands.find((command) => index.raw.has(command));
+  if (usedCommand) {
+    return indirectEntry(entry, `its command "${usedCommand}" is run`, [
+      index.raw.get(usedCommand)!,
+    ]);
+  }
+
+  // 5. Another declared dependency lists it as a peer (an optional peer is loaded when present).
+  const peerFor = peerOf.get(name);
+  if (peerFor) {
+    return indirectEntry(
+      entry,
+      `a${peerFor.optional ? "n optional" : ""} peer dependency of ${peerFor.dependent}${peerFor.optional ? ", which uses it when installed" : ""}`,
+    );
+  }
+
+  // 6. Declared again as this package's own peer: the development copy.
+  if (manifest.peerDependencies?.[name]) {
+    return indirectEntry(
+      entry,
+      "also declared as a peer dependency (the development copy used to build and test against)",
+    );
+  }
+
+  // 7. Named as a string: a mock, a dynamic specifier, a plugin list in a script file.
+  const mention = usage.mentions.get(name);
+  if (mention) {
+    return indirectEntry(
+      entry,
+      "named in a string rather than imported (a mock path, plugin list or dynamic specifier)",
+      mention,
+    );
+  }
+
+  // 8. Used by another package of the workspace, for dependencies declared at the root.
+  const consumer = context.elsewhere?.find(
+    (other) =>
+      other.usage.references.has(name) ||
+      other.usage.mentions.has(name) ||
+      other.index.candidates.has(name) ||
+      commands.some((command) => other.index.raw.has(command)),
+  );
+  if (consumer) {
+    return indirectEntry(entry, `used by the workspace package ${consumer.packageName}`);
+  }
+
+  if (bundled.has(name)) {
+    return indirectEntry(entry, "listed in bundledDependencies, so it ships with the package");
+  }
+  return undefined;
+}
+
+/** What keeps an unused dependency from being certainly unused; empty means it is certainly unused. */
+function uncertaintyReasons(
+  entry: DeclaredEntry,
+  context: ClassifyContext,
+  installedManifest: Manifest | undefined,
+  commands: string[],
+  typesFor: string | undefined,
+): string[] {
+  const { usage } = context;
+  const { name } = entry;
+  const reasons: string[] = [];
+  if (entry.section === "optionalDependencies") {
+    reasons.push(
+      "an optional dependency, usually a platform-specific or conditionally loaded package",
+    );
+  }
+  if (installedManifest === undefined) {
+    reasons.push("not installed here, so its commands and peer links could not be read");
+  }
+  if (commands.length > 0) {
+    reasons.push(
+      `provides the command${commands.length > 1 ? "s" : ""} ${commands.map((command) => `"${command}"`).join(", ")}, which no script, config or workflow here runs (it may be run by hand or from outside the repository)`,
+    );
+  }
+  if (PLUGIN_STYLE.test(name)) {
+    reasons.push(
+      "a plugin, preset, loader or config package, which tools load by name from configuration the scan did not find it in",
+    );
+  }
+  if (typesFor === "node") {
+    reasons.push("Node's types, but no TypeScript file or tsconfig was found");
+  }
+  if (usage.dynamicLoadFiles.length > 0) {
+    reasons.push(
+      `${usage.dynamicLoadFiles.length} file(s) load modules by a name only known at runtime, which could load it`,
+    );
+  }
+  if (usage.unparsedFiles.length > 0) {
+    reasons.push(
+      `${usage.unparsedFiles.length} file(s) could not be fully read, and might import it`,
+    );
+  }
+  const sourceInWorkspace =
+    usage.sourceFiles > 0 || (context.elsewhere ?? []).some((other) => other.usage.sourceFiles > 0);
+  if (!sourceInWorkspace) {
+    reasons.push("no source files were found, so usage cannot be judged");
+  }
+  return reasons;
+}
+
+/** `@types/x` follows `x`: used if x is, unused if x is, unknown if x is not here at all. */
+function classifyTypePackages(
+  typeEntries: { entry: DeclaredEntry; target: string }[],
+  unused: UnusedDependency[],
+  used: string[],
+  context: ClassifyContext,
+): UnusedDependency[] {
+  const { usage, index } = context;
+  const result: UnusedDependency[] = [];
   const classified = new Map(unused.map((entry) => [entry.name, entry.classification] as const));
   for (const { entry, target } of typeEntries) {
     const targetClass = classified.get(target);
@@ -434,32 +369,30 @@ export function classifyDependencies(context: ClassifyContext): Classified {
       used.includes(target);
     const base = { name: entry.name, section: entry.section, range: entry.range };
     if (targetUsed || targetClass === "used-indirectly") {
-      unused.push({
+      result.push({
         ...base,
         classification: "used-indirectly",
         reason: `type declarations for ${target}, which this package uses`,
       });
     } else if (targetClass === "certainly-unused") {
-      unused.push({
+      result.push({
         ...base,
         classification: "certainly-unused",
         reason: `type declarations for ${target}, which is itself unused`,
       });
     } else if (targetClass === "probably-unused") {
-      unused.push({
+      result.push({
         ...base,
         classification: "probably-unused",
         reason: `type declarations for ${target}, which is itself probably unused`,
       });
     } else {
-      unused.push({
+      result.push({
         ...base,
         classification: "probably-unused",
         reason: `type declarations for ${target}, which is neither declared nor imported here; global-type packages (a test runner's) apply without an import`,
       });
     }
   }
-
-  unused.sort((left, right) => left.name.localeCompare(right.name));
-  return { used, unused, dependenciesInstalled };
+  return result;
 }

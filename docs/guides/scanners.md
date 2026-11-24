@@ -29,6 +29,11 @@ the npm format.
 | `yarn-audit` | `yarn audit --json` |
 | `sarif` | Any SARIF 2.1.0 producer |
 
+A file that is not in the chosen format is an error that names the file and the field, never "0
+findings": npm audit JSON needs a top-level `vulnerabilities` object, SARIF needs `runs`, and Yarn
+output needs an `auditAdvisory` or `auditSummary` record. A clean report (an empty `vulnerabilities`
+object, an empty `runs` list, or only a summary record) is still a valid report with no findings.
+
 Findings are deduplicated by id, so an advisory reported twice is fixed once. An advisory with a CVE
 id is handled under it; one with only a GHSA id is handled under the GHSA id.
 
@@ -43,6 +48,10 @@ autoremediator diff --base origin/main --ci
 
 It compares the dependency manifests at the base and in the working tree, and reports
 vulnerabilities in the added or upgraded packages.
+
+A changed lockfile that cannot be read (a merge conflict left in `package-lock.json`, invalid YAML in
+`pnpm-lock.yaml`) stops the scan with an error that names the file. It is never read as "no
+dependencies", which would make every package look added or removed.
 
 ## Interactive triage
 

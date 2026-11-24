@@ -2,8 +2,8 @@ import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 
 import type { LockGraph } from "./lockfile.js";
+import { readManifest } from "./manifest.js";
 import type { AttackSurface, SurfaceComponent } from "./types.js";
-import { readManifest } from "./unused.js";
 
 const INSTALL_SCRIPTS = ["preinstall", "install", "postinstall"] as const;
 
@@ -130,12 +130,25 @@ export function attackSurface(input: SurfaceInputs): AttackSurface {
     },
   ];
 
+  const limits = surfaceLimits(input);
+
+  return {
+    score: Math.round(components.reduce((total, component) => total + component.points, 0)),
+    formulaVersion: 1,
+    components,
+    facts: surfaceFacts(input),
+    limits,
+  };
+}
+
+/** What the score cannot see, stated next to it so a low number is not read as a clean bill. */
+function surfaceLimits(input: SurfaceInputs): string[] {
   const limits: string[] = [];
-  if (input.lockfileNote)
+  if (input.lockfileNote) {
     limits.push(
       `${input.lockfileNote}; package count, depth, install scripts, deprecations and copies are not counted, so the score is a lower bound`,
     );
-  else if (input.installedMissing) {
+  } else if (input.installedMissing) {
     limits.push(
       `only ${input.manifestsRead} of ${input.installedPackages} installed package.json files could be read (the rest are not installed here, such as optional packages for other platforms), so install scripts for those come only from lockfile flags and may be undercounted`,
     );
@@ -143,23 +156,20 @@ export function attackSurface(input: SurfaceInputs): AttackSurface {
   limits.push(
     "unmaintained packages are not detected: that needs registry data, and only the lockfile's deprecation flag is read",
   );
+  return limits;
+}
 
+function surfaceFacts(input: SurfaceInputs): AttackSurface["facts"] {
   return {
-    score: Math.round(components.reduce((total, component) => total + component.points, 0)),
-    formulaVersion: 1,
-    components,
-    facts: {
-      installedPackages: input.installedPackages,
-      directDependencies: input.directDependencies,
-      maxDepth: input.maxDepth,
-      installScriptPackages: input.installScriptPackages,
-      deprecatedPackages: input.deprecatedPackages,
-      certainlyUnused: input.certainlyUnused,
-      probablyUnused: input.probablyUnused,
-      replaceable: input.replaceable,
-      extraCopies: input.extraCopies,
-      manifestsRead: input.manifestsRead,
-    },
-    limits,
+    installedPackages: input.installedPackages,
+    directDependencies: input.directDependencies,
+    maxDepth: input.maxDepth,
+    installScriptPackages: input.installScriptPackages,
+    deprecatedPackages: input.deprecatedPackages,
+    certainlyUnused: input.certainlyUnused,
+    probablyUnused: input.probablyUnused,
+    replaceable: input.replaceable,
+    extraCopies: input.extraCopies,
+    manifestsRead: input.manifestsRead,
   };
 }

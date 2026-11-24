@@ -52,4 +52,15 @@ describe("parseSarifFromString", () => {
     expect(findings).toHaveLength(1);
     expect(findings[0]?.cveId).toBe("CVE-2020-8203");
   });
+
+  it("reads a report with no runs as no findings", () => {
+    expect(parseSarifFromString('{"version":"2.1.0","runs":[]}')).toEqual([]);
+  });
+
+  it.each(["{}", "[]", '{"runs":"x"}', '{"runs":[{"results":"x"}]}'])(
+    "rejects %s instead of reporting zero findings",
+    (content) => {
+      expect(() => parseSarifFromString(content, "scan.sarif")).toThrow(/scan\.sarif/);
+    },
+  );
 });

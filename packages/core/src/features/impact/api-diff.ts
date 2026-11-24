@@ -7,7 +7,8 @@
  * matter to a given caller (a type text that changed, which could be a widening). The text of both
  * sides is always kept so the reader can judge.
  */
-import type { ApiMember, ApiSurface, ApiSymbol, Signature } from "./dts-surface.js";
+import type { ApiMember, ApiSurface, ApiSymbol } from "./dts-surface.js";
+import { compareSignatures } from "./signature-diff.js";
 
 export type ChangeSeverity = "breaking" | "possibly-breaking";
 
@@ -43,161 +44,13 @@ export interface ApiChange {
   renamedTo?: string;
 }
 
-function arityOf(signature: Signature): { min: number; max: number } {
-  const hasRest = signature.params.some((param) => param.rest);
-  const min = signature.params.filter((param) => !param.optional && !param.rest).length;
-  return { min, max: hasRest ? Number.POSITIVE_INFINITY : signature.params.length };
-}
-
-function describeArity(arity: { min: number; max: number }): string {
-  return arity.max === Number.POSITIVE_INFINITY
-    ? `${arity.min}+`
-    : arity.min === arity.max
-      ? `${arity.min}`
-      : `${arity.min}-${arity.max}`;
-}
-
-interface SignatureFinding {
-  category: ApiChangeCategory;
-  severity: ChangeSeverity;
-  reason: string;
-  before?: string;
-  after?: string;
-  arity?: { min: number; max: number };
-}
-
-function comparePair(before: Signature, after: Signature, typed: boolean): SignatureFinding[] {
-  const findings: SignatureFinding[] = [];
-  const oldArity = arityOf(before);
-  const newArity = arityOf(after);
-  // Without types a parameter count is only a hint: a JavaScript function may ignore extra
-  // arguments or default a missing one.
-  const countSeverity: ChangeSeverity = typed ? "breaking" : "possibly-breaking";
-
-  if (newArity.min > oldArity.min) {
-    findings.push({
-      category: "signature-changed",
-      severity: countSeverity,
-      reason: `now requires at least ${newArity.min} argument${newArity.min === 1 ? "" : "s"} (was ${oldArity.min})`,
-      before: before.text,
-      after: after.text,
-      arity: newArity,
-    });
-  } else if (newArity.max < oldArity.max) {
-    findings.push({
-      category: "signature-changed",
-      severity: countSeverity,
-      reason: `now accepts at most ${describeArity({ min: newArity.max, max: newArity.max })} argument${newArity.max === 1 ? "" : "s"} (was ${oldArity.max === Number.POSITIVE_INFINITY ? "any number" : oldArity.max})`,
-      before: before.text,
-      after: after.text,
-      arity: newArity,
-    });
-  }
-  if (!typed) return findings;
-
-  const shared = Math.min(before.params.length, after.params.length);
-  const typeChanges: string[] = [];
-  for (let index = 0; index < shared; index++) {
-    const oldParam = before.params[index];
-    const newParam = after.params[index];
-    if (!oldParam || !newParam) continue;
-    if (
-      oldParam.type !== undefined &&
-      newParam.type !== undefined &&
-      oldParam.type !== newParam.type
-    ) {
-      typeChanges.push(`\`${newParam.name}\`: ${oldParam.type} -> ${newParam.type}`);
-    }
-    if (oldParam.optional && !newParam.optional && !findings.some((finding) => finding.arity)) {
-      findings.push({
-        category: "signature-changed",
-        severity: "breaking",
-        reason: `parameter \`${newParam.name}\` is no longer optional`,
-        before: before.text,
-        after: after.text,
-        arity: newArity,
-      });
-    }
-  }
-  if (typeChanges.length > 0) {
-    findings.push({
-      category: "type-changed",
-      severity: "possibly-breaking",
-      reason: `parameter type changed (${typeChanges.slice(0, 3).join("; ")}); it may be a widening`,
-      before: before.text,
-      after: after.text,
-    });
-  }
-  if (
-    before.returns !== after.returns &&
-    before.returns !== undefined &&
-    after.returns !== undefined
-  ) {
-    findings.push({
-      category: "type-changed",
-      severity: "possibly-breaking",
-      reason: `return type changed (${before.returns} -> ${after.returns})`,
-      before: before.text,
-      after: after.text,
-    });
-  }
-  if ((before.typeParams ?? "") !== (after.typeParams ?? "")) {
-    findings.push({
-      category: "type-changed",
-      severity: "possibly-breaking",
-      reason: `type parameters changed (${before.typeParams ?? "none"} -> ${after.typeParams ?? "none"})`,
-      before: before.text,
-      after: after.text,
-    });
-  }
-  return findings;
-}
-
-/** Findings for one callable whose set of overload signatures changed. */
-export function compareSignatures(
-  before: Signature[],
-  after: Signature[],
-  typed: boolean,
-): SignatureFinding[] {
-  if (before.length === 0 || after.length === 0) return [];
-  const afterTexts = new Set(after.map((signature) => signature.text));
-  const beforeTexts = new Set(before.map((signature) => signature.text));
-  const removed = before.filter((signature) => !afterTexts.has(signature.text));
-  const added = after.filter((signature) => !beforeTexts.has(signature.text));
-  if (removed.length === 0) return [];
-  const [onlyRemoved] = removed;
-  const [onlyAdded] = added;
-  if (removed.length === 1 && added.length === 1 && onlyRemoved && onlyAdded) {
-    return comparePair(onlyRemoved, onlyAdded, typed);
-  }
-  if (added.length === 0) {
-    return [
-      {
-        category: "signature-changed",
-        severity: "breaking",
-        reason: `${removed.length === 1 ? "an overload was" : `${removed.length} overloads were`} removed`,
-        before: removed.map((signature) => signature.text).join(" | "),
-        after: after.map((signature) => signature.text).join(" | "),
-      },
-    ];
-  }
-  return [
-    {
-      category: "signature-changed",
-      severity: "possibly-breaking",
-      reason: "overloads changed",
-      before: removed.map((signature) => signature.text).join(" | "),
-      after: added.map((signature) => signature.text).join(" | "),
-    },
-  ];
-}
-
 function shapeOf(symbol: ApiSymbol): string {
-  if (symbol.kind === "function")
+  if (symbol.kind === "function") {
     return `function:${symbol.signatures
       .map((s) => s.text)
       .toSorted()
       .join("|")}`;
+  }
   if (
     symbol.kind === "class" ||
     symbol.kind === "interface" ||
@@ -216,27 +69,25 @@ function memberShape(member: ApiMember): string {
   return `${member.kind}/${member.optional}/${member.signatures.map((signature) => signature.text).join(",")}/${member.type ?? ""}`;
 }
 
-function memberChanges(
-  specifier: string,
-  name: string,
-  before: ApiSymbol,
-  after: ApiSymbol,
-  typed: boolean,
+/** Where a member change sits: the export, the member and what contains it. */
+interface MemberSite {
+  specifier: string;
+  symbol: string;
+  memberOf: ApiChange["memberOf"];
+}
+
+function memberSite(specifier: string, name: string, kind: ApiSymbol["kind"]): MemberSite {
+  return { specifier, symbol: name, memberOf: memberContainerOf(kind) };
+}
+
+/** Members that are gone: a probable rename when an added member has the same shape. */
+function removedMemberChanges(
+  site: MemberSite,
+  removed: ApiMember[],
+  added: ApiMember[],
+  claimed: Set<string>,
 ): ApiChange[] {
   const changes: ApiChange[] = [];
-  const memberOf =
-    before.kind === "variable"
-      ? "object"
-      : before.kind === "class" ||
-          before.kind === "interface" ||
-          before.kind === "namespace" ||
-          before.kind === "enum"
-        ? before.kind
-        : undefined;
-  const removed = [...before.members.values()].filter((member) => !after.members.has(member.key));
-  const added = [...after.members.values()].filter((member) => !before.members.has(member.key));
-  const claimed = new Set<string>();
-
   for (const member of removed) {
     const twin = added.find(
       (candidate) =>
@@ -247,10 +98,8 @@ function memberChanges(
     if (twin) {
       claimed.add(twin.key);
       changes.push({
-        specifier,
-        symbol: name,
+        ...site,
         member: member.key,
-        memberOf,
         category: "renamed-member",
         severity: "breaking",
         reason: `\`${member.name}\` is gone; \`${twin.name}\` has the same shape (probable rename)`,
@@ -258,10 +107,8 @@ function memberChanges(
       });
     } else {
       changes.push({
-        specifier,
-        symbol: name,
+        ...site,
         member: member.key,
-        memberOf,
         category: "removed-member",
         severity: "breaking",
         reason: `member \`${member.name}\` was removed`,
@@ -269,79 +116,81 @@ function memberChanges(
       });
     }
   }
+  return changes;
+}
 
-  for (const member of before.members.values()) {
-    const next = after.members.get(member.key);
-    if (!next) continue;
-    if (member.kind !== next.kind) {
-      changes.push({
-        specifier,
-        symbol: name,
-        member: member.key,
-        memberOf,
-        category: "member-changed",
+/** What changed about a member that exists on both sides. */
+function keptMemberChanges(
+  site: MemberSite,
+  member: ApiMember,
+  next: ApiMember,
+  typed: boolean,
+): ApiChange[] {
+  const at = { ...site, member: member.key, category: "member-changed" as const };
+  if (member.kind !== next.kind) {
+    return [
+      {
+        ...at,
         severity: "breaking",
         reason: `member \`${member.name}\` changed from ${member.kind} to ${next.kind}`,
-      });
-      continue;
-    }
-    for (const finding of compareSignatures(member.signatures, next.signatures, typed)) {
-      changes.push({
-        specifier,
-        symbol: name,
-        member: member.key,
-        memberOf,
-        ...finding,
-        category: "member-changed",
-      });
-    }
-    if (member.type !== undefined && next.type !== undefined && member.type !== next.type) {
-      changes.push({
-        specifier,
-        symbol: name,
-        member: member.key,
-        memberOf,
-        category: "member-changed",
-        severity: "possibly-breaking",
-        reason: `type of \`${member.name}\` changed (${member.type} -> ${next.type})`,
-        before: member.type,
-        after: next.type,
-      });
-    }
-    if (member.optional !== next.optional) {
-      changes.push({
-        specifier,
-        symbol: name,
-        member: member.key,
-        memberOf,
-        category: "member-changed",
-        severity: "possibly-breaking",
-        reason: next.optional
-          ? `\`${member.name}\` became optional (may now be undefined)`
-          : `\`${member.name}\` became required`,
-      });
-    }
-    if (!member.readonly && next.readonly) {
-      changes.push({
-        specifier,
-        symbol: name,
-        member: member.key,
-        memberOf,
-        category: "member-changed",
-        severity: "possibly-breaking",
-        reason: `\`${member.name}\` became readonly`,
-      });
-    }
+      },
+    ];
   }
+  const changes: ApiChange[] = [];
+  for (const finding of compareSignatures(member.signatures, next.signatures, typed)) {
+    changes.push({ ...at, ...finding, category: "member-changed" });
+  }
+  if (member.type !== undefined && next.type !== undefined && member.type !== next.type) {
+    changes.push({
+      ...at,
+      severity: "possibly-breaking",
+      reason: `type of \`${member.name}\` changed (${member.type} -> ${next.type})`,
+      before: member.type,
+      after: next.type,
+    });
+  }
+  if (member.optional !== next.optional) {
+    changes.push({
+      ...at,
+      severity: "possibly-breaking",
+      reason: next.optional
+        ? `\`${member.name}\` became optional (may now be undefined)`
+        : `\`${member.name}\` became required`,
+    });
+  }
+  if (!member.readonly && next.readonly) {
+    changes.push({
+      ...at,
+      severity: "possibly-breaking",
+      reason: `\`${member.name}\` became readonly`,
+    });
+  }
+  return changes;
+}
 
+function memberChanges(
+  specifier: string,
+  name: string,
+  before: ApiSymbol,
+  after: ApiSymbol,
+  typed: boolean,
+): ApiChange[] {
+  const site = memberSite(specifier, name, before.kind);
+  const removed = [...before.members.values()].filter((member) => !after.members.has(member.key));
+  const added = [...after.members.values()].filter((member) => !before.members.has(member.key));
+  const claimed = new Set<string>();
+
+  const changes = removedMemberChanges(site, removed, added, claimed);
+  for (const member of before.members.values()) {
+    const next = after.members.get(member.key);
+    if (next) changes.push(...keptMemberChanges(site, member, next, typed));
+  }
   if (before.kind === "interface") {
     for (const member of added) {
       if (claimed.has(member.key) || member.optional || member.kind === "index") continue;
       changes.push({
-        specifier,
-        symbol: name,
+        ...site,
         member: member.key,
-        memberOf,
         category: "added-required-member",
         severity: "possibly-breaking",
         reason: `new required member \`${member.name}\` (breaks code that implements or constructs this interface)`,
@@ -466,4 +315,15 @@ export function compareSurfaces(
     if (next) changes.push(...compareSymbol(specifier, symbol.name, symbol, next, typed));
   }
   return changes;
+}
+
+/** What a changed member belongs to, in the words a report uses; undefined for kinds with no members. */
+function memberContainerOf(kind: ApiSymbol["kind"]): ApiChange["memberOf"] {
+  if (kind === "variable") {
+    return "object";
+  }
+  if (kind === "class" || kind === "interface" || kind === "namespace" || kind === "enum") {
+    return kind;
+  }
+  return undefined;
 }

@@ -45,32 +45,91 @@ export async function resolveTarget(
   deps: TargetDeps = defaultTargetDeps,
 ): Promise<IncidentTarget> {
   const typed = input.trim();
-  if (typed === "")
+  if (typed === "") {
     throw new Error(
       "Name what was compromised: an advisory id (MAL-…, GHSA-…, CVE-…) or package@range.",
     );
+  }
 
   if (!isAdvisoryId(typed)) {
-    const parsed = parsePackageSpec(typed);
-    if (parsed.kind !== "registry") {
-      throw new Error(
-        parsed.kind === "invalid"
-          ? `"${typed.slice(0, 80)}" is neither an advisory id nor a package spec (${parsed.reason}).`
-          : `"${typed.slice(0, 80)}" is not a registry package spec.`,
-      );
-    }
-    if (!parsed.range) {
-      throw new Error(
-        `Say which versions of ${parsed.name} are bad: "${parsed.name}@1.2.3" or "${parsed.name}@>=1.2.0 <1.2.5" (quote it in the shell).`,
-      );
-    }
-    const range = normalizeRange(parsed.range);
-    if (!range)
-      throw new Error(`"${parsed.range}" is not a valid semver range for ${parsed.name}.`);
-    return { input: typed, kind: "package-range", affected: [{ name: parsed.name, range }] };
+    return packageRangeTarget(typed);
   }
 
   const id = normalizeAdvisoryId(typed);
+  const { details, source } = await lookupAdvisory(id, options, deps);
+  if (!details) {
+    throw new Error(
+      options.offline
+        ? `${id} is not in the intelligence snapshot.`
+        : `${id} was not found in OSV or the GitHub advisory database. Check the id, or name the package and versions directly (package@range).`,
+    );
+  }
+
+  const affected: AffectedRange[] = [];
+  for (const entry of details.affectedPackages) {
+    if (entry.ecosystem !== "npm") continue;
+    const range = normalizeRange(entry.vulnerableRange);
+    if (!range) continue;
+    const existing = affected.find((candidate) => candidate.name === entry.name);
+    // The same package listed twice (two ranges): either range being installed counts.
+    if (existing) existing.range = `${existing.range} || ${range}`;
+    else {
+      affected.push({
+        name: entry.name,
+        range,
+        ...(entry.firstPatchedVersion ? { firstPatchedVersion: entry.firstPatchedVersion } : {}),
+      });
+    }
+  }
+  if (affected.length === 0) {
+    throw new Error(
+      `${id} names no npm package with a usable version range, so there is nothing to look for. Give the package and versions yourself (package@range).`,
+    );
+  }
+  return {
+    input: typed,
+    kind: "advisory",
+    advisory: {
+      id,
+      summary: details.summary.slice(0, 500),
+      source,
+      references: details.references.slice(0, 10),
+    },
+    affected,
+  };
+}
+
+/** `package@range` as typed: the named package and the versions that are bad. */
+function packageRangeTarget(typed: string): IncidentTarget {
+  const parsed = parsePackageSpec(typed);
+  if (parsed.kind !== "registry") {
+    throw new Error(
+      parsed.kind === "invalid"
+        ? `"${typed.slice(0, 80)}" is neither an advisory id nor a package spec (${parsed.reason}).`
+        : `"${typed.slice(0, 80)}" is not a registry package spec.`,
+    );
+  }
+  if (!parsed.range) {
+    throw new Error(
+      `Say which versions of ${parsed.name} are bad: "${parsed.name}@1.2.3" or "${parsed.name}@>=1.2.0 <1.2.5" (quote it in the shell).`,
+    );
+  }
+  const range = normalizeRange(parsed.range);
+  if (!range) {
+    throw new Error(`"${parsed.range}" is not a valid semver range for ${parsed.name}.`);
+  }
+  return { input: typed, kind: "package-range", affected: [{ name: parsed.name, range }] };
+}
+
+/** The advisory's details and where they came from: the offline snapshot, OSV or GitHub. */
+async function lookupAdvisory(
+  id: string,
+  options: { offline?: boolean; intelligenceSnapshotPath?: string },
+  deps: TargetDeps,
+): Promise<{
+  details: CveDetails | null;
+  source: NonNullable<IncidentTarget["advisory"]>["source"];
+}> {
   let details: CveDetails | null;
   let source: NonNullable<IncidentTarget["advisory"]>["source"];
   if (options.offline) {
@@ -100,43 +159,5 @@ export async function resolveTarget(
     if (details && github.length > 0) details = mergeGhDataIntoCveDetails(details, github);
     source = osv ? "osv" : "github-advisory";
   }
-  if (!details) {
-    throw new Error(
-      options.offline
-        ? `${id} is not in the intelligence snapshot.`
-        : `${id} was not found in OSV or the GitHub advisory database. Check the id, or name the package and versions directly (package@range).`,
-    );
-  }
-
-  const affected: AffectedRange[] = [];
-  for (const entry of details.affectedPackages) {
-    if (entry.ecosystem !== "npm") continue;
-    const range = normalizeRange(entry.vulnerableRange);
-    if (!range) continue;
-    const existing = affected.find((candidate) => candidate.name === entry.name);
-    // The same package listed twice (two ranges): either range being installed counts.
-    if (existing) existing.range = `${existing.range} || ${range}`;
-    else
-      affected.push({
-        name: entry.name,
-        range,
-        ...(entry.firstPatchedVersion ? { firstPatchedVersion: entry.firstPatchedVersion } : {}),
-      });
-  }
-  if (affected.length === 0) {
-    throw new Error(
-      `${id} names no npm package with a usable version range, so there is nothing to look for. Give the package and versions yourself (package@range).`,
-    );
-  }
-  return {
-    input: typed,
-    kind: "advisory",
-    advisory: {
-      id,
-      summary: details.summary.slice(0, 500),
-      source,
-      references: details.references.slice(0, 10),
-    },
-    affected,
-  };
+  return { details, source };
 }

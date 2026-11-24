@@ -18,9 +18,13 @@ import * as commandCheck from "./command-check.js";
 import { CHECK_NAMES, type VerifyRequest } from "./types.js";
 import { verify } from "./verifier.js";
 
-const mocks = vi.hoisted(() => ({ inventory: vi.fn() }));
+const mocks = vi.hoisted(() => ({ inventory: vi.fn(), trust: vi.fn() }));
 vi.mock("../remediate/tools/check-inventory.js", () => ({
   checkInventoryTool: { execute: mocks.inventory },
+}));
+vi.mock("../guard/supply-chain.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../guard/supply-chain.js")>()),
+  verifyPackageTrust: mocks.trust,
 }));
 vi.mock("./command-check.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("./command-check.js")>()),
@@ -47,6 +51,7 @@ beforeEach(() => {
   git("add", "-A");
   git("commit", "-q", "-m", "init");
   mocks.inventory.mockReset();
+  mocks.trust.mockReset();
   vi.mocked(commandCheck.runCommandCheck).mockClear();
 });
 afterEach(() => {
@@ -257,6 +262,47 @@ describe("policy check", () => {
     const result = await verify(request({ checks: ["policy"] }));
     expect(result).toMatchObject({ passed: false, failedCheck: "policy" });
     expect(result.checks[0]?.message).toMatch(/could not be loaded/);
+  });
+});
+
+describe("supply-chain check", () => {
+  it("vets each version a change introduces and reports the ones that fail", async () => {
+    mocks.trust.mockResolvedValue({ trusted: false, reason: "published 2 hours ago" });
+    write("package.json", manifest({ lodash: "^4.17.21" }));
+    const result = await verify(request({ checks: ["supply-chain"] }));
+    expect(mocks.trust.mock.calls[0]?.slice(0, 2)).toEqual(["lodash", "4.17.21"]);
+    expect(result).toMatchObject({ passed: false, failedCheck: "supply-chain" });
+    expect(result.checks[0]?.details?.[0]).toMatch(/lodash@4\.17\.21: published 2 hours ago/);
+  });
+
+  it("passes when every new version is trusted, and is skipped offline", async () => {
+    mocks.trust.mockResolvedValue({ trusted: true });
+    write("package.json", manifest({ lodash: "4.17.21" }));
+    expect((await verify(request({ checks: ["supply-chain"] }))).passed).toBe(true);
+    const offline = await verify(request({ checks: ["supply-chain"], options: { offline: true } }));
+    expect(offline.checks[0]).toMatchObject({ status: "skipped" });
+  });
+
+  it.each([
+    "github:attacker/lodash",
+    "git+https://example.test/lodash.git#main",
+    "https://example.test/lodash-4.17.21.tgz",
+    "npm:other-package@1.0.0",
+    "latest",
+  ])("fails a dependency moved to %s, which the gate cannot vet", async (spec) => {
+    mocks.trust.mockResolvedValue({ trusted: true });
+    write("package.json", manifest({ lodash: spec }));
+    const result = await verify(request({ checks: ["supply-chain"] }));
+    expect(result).toMatchObject({ passed: false, failedCheck: "supply-chain" });
+    expect(result.checks[0]?.details?.[0]).toMatch(/lodash.*cannot be vetted/);
+  });
+
+  it("does not vet specs that point inside the repository", async () => {
+    mocks.trust.mockResolvedValue({ trusted: true });
+    write("package.json", manifest({ lodash: "file:../lodash" }));
+    const result = await verify(request({ checks: ["supply-chain"] }));
+    expect(result.checks[0]).toMatchObject({ status: "passed" });
+    expect(mocks.trust).not.toHaveBeenCalled();
   });
 });
 

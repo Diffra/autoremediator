@@ -16,8 +16,9 @@ const highest = (versions: readonly string[]): string | undefined =>
   versions.toSorted((left, right) => semver.rcompare(left, right))[0];
 
 function parentOf(graph: LockGraph, edge: LockEdge): DuplicateParent {
-  if (edge.fromDirect)
+  if (edge.fromDirect) {
     return { name: edge.from, ...(edge.range ? { range: edge.range } : {}), direct: true };
+  }
   const node = graph.nodes.get(edge.from);
   return {
     name: node?.name ?? edge.from,
@@ -87,22 +88,8 @@ export function analyzeDuplicates(graph: LockGraph): DuplicatesReport {
       ? highest(sorted.filter((version) => semver.valid(version) && acceptedBy(version, allRanges)))
       : undefined;
 
-    let verdict: DuplicateVerdict;
-    let summary: string;
-    const moved = entries.filter((entry) => entry.movableTo);
-    if (!rangesKnown) {
-      verdict = "unknown-ranges";
-      summary = `${sorted.length} versions; the ranges its parents ask for are not on record (install dependencies so they can be read), so a dedupe cannot be judged`;
-    } else if (unified) {
-      verdict = "dedupe-within-range";
-      summary = `${sorted.length} versions, but every parent accepts ${unified}: a dedupe or an override to it stays within every range`;
-    } else if (moved.length > 0) {
-      verdict = "partly-dedupable";
-      summary = `${sorted.length} versions; ${moved.length} can move to a version their parents already accept, the rest are held by a parent whose range excludes the others`;
-    } else {
-      verdict = "needs-override-or-upgrade";
-      summary = `${sorted.length} versions, and each is held by a parent whose range excludes the others: collapsing them needs an override that leaves a parent's range, or upgrading the parent`;
-    }
+    const moved = entries.filter((entry) => entry.movableTo).length;
+    const { verdict, summary } = describeVerdict(sorted.length, rangesKnown, unified, moved);
     packages.push({
       name,
       versions: entries,
@@ -152,4 +139,34 @@ export function dependencyDepths(graph: LockGraph): {
     frontier = next;
   }
   return { maxDepth, directDependencies: direct.size };
+}
+
+function describeVerdict(
+  versionCount: number,
+  rangesKnown: boolean,
+  unified: string | undefined,
+  movedCount: number,
+): { verdict: DuplicateVerdict; summary: string } {
+  if (!rangesKnown) {
+    return {
+      verdict: "unknown-ranges",
+      summary: `${versionCount} versions; the ranges its parents ask for are not on record (install dependencies so they can be read), so a dedupe cannot be judged`,
+    };
+  }
+  if (unified) {
+    return {
+      verdict: "dedupe-within-range",
+      summary: `${versionCount} versions, but every parent accepts ${unified}: a dedupe or an override to it stays within every range`,
+    };
+  }
+  if (movedCount > 0) {
+    return {
+      verdict: "partly-dedupable",
+      summary: `${versionCount} versions; ${movedCount} can move to a version their parents already accept, the rest are held by a parent whose range excludes the others`,
+    };
+  }
+  return {
+    verdict: "needs-override-or-upgrade",
+    summary: `${versionCount} versions, and each is held by a parent whose range excludes the others: collapsing them needs an override that leaves a parent's range, or upgrading the parent`,
+  };
 }

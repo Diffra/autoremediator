@@ -473,8 +473,12 @@ describe("files init does not own", () => {
     ".cursor/rules/autoremediator.mdc",
     ".github/agents/autoremediator.agent.md",
   ];
-  const hostFor = (path: string) =>
-    path.startsWith(".claude") ? "claude-code" : path.startsWith(".cursor") ? "cursor" : "copilot";
+  const hostFor = (path: string) => {
+    if (path.startsWith(".claude")) {
+      return "claude-code";
+    }
+    return path.startsWith(".cursor") ? "cursor" : "copilot";
+  };
 
   it.each(ours)("leaves a file of the user's at %s alone and says why", async (path) => {
     put(path, "---\nname: mine\n---\n\nMy own instructions.\n");

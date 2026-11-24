@@ -245,198 +245,220 @@ export async function runProofOfFixPhase(
 
   try {
     const result = await execProofScript({ testFilePath, cwd, timeoutMs, isTs });
-
-    const durationMs = Date.now() - started;
-    const stdout = result.stdout ?? "";
-    const stderr = result.stderr ?? "";
-    const output = `${stdout}\n${stderr}`.trim();
-
-    if (stage === "negative") {
-      // In negative phase, passing cleanly (exitCode 0) means vulnerability was NOT reproduced (false negative).
-      return {
-        executed: true,
-        passed: false,
-        exitCode: 0,
-        output,
-        durationMs,
-        error:
-          "Exploit reproduction test passed on vulnerable target (failed to reproduce vulnerability).",
-      };
-    }
-
-    // In positive phase, exit code 0 means remediation succeeded cleanly.
-    return {
-      executed: true,
-      passed: true,
-      exitCode: 0,
-      output,
-      durationMs,
-    };
+    return completedPhase(stage, result, Date.now() - started);
   } catch (err: unknown) {
-    const durationMs = Date.now() - started;
-    if (err instanceof ProofSandboxError) {
-      // Never a pass, in either stage: a script that did not run proves nothing.
-      return {
-        executed: false,
-        passed: false,
-        harnessFailure: true,
-        exitCode: 1,
-        output: err.message,
-        durationMs,
-        error: err.message,
-      };
-    }
-    const execaErr = err as {
-      exitCode?: number;
-      stdout?: string;
-      stderr?: string;
-      message?: string;
-      timedOut?: boolean;
-      signal?: string;
-      code?: string;
-    };
-    const exitCode = typeof execaErr.exitCode === "number" ? execaErr.exitCode : 1;
-    const errorMsg = execaErr.message || String(err);
-    const rawStdout = (execaErr.stdout ?? "").trim();
-    const rawStderr = (execaErr.stderr ?? "").trim();
-    const processOutput = [rawStdout, rawStderr].filter(Boolean).join("\n").trim();
-    const output = processOutput || errorMsg;
+    return failedPhase(stage, err, { cwd, testFilePath, durationMs: Date.now() - started });
+  }
+}
 
-    if (stage === "negative") {
-      // 1. Timeout handling
-      if (
-        execaErr.timedOut ||
-        errorMsg.includes("timed out") ||
-        output.includes("timed out") ||
-        execaErr.code === "ETIMEDOUT"
-      ) {
-        return {
-          executed: true,
-          passed: false,
-          harnessFailure: true,
-          exitCode,
-          output,
-          durationMs,
-          error: "Exploit reproduction test timed out (execution hung).",
-        };
-      }
+/** The script ran to the end with exit code 0. */
+function completedPhase(
+  stage: RunProofOfFixPhaseOptions["stage"],
+  result: { stdout?: string; stderr?: string },
+  durationMs: number,
+): ProofOfFixPhaseResult {
+  const output = `${result.stdout ?? ""}\n${result.stderr ?? ""}`.trim();
 
-      // 2. Reject harness execution failures (syntax error, missing module, missing file, bad CLI, crash)
-      if (
-        isHarnessFailure({
-          exitCode,
-          output,
-          errorMsg,
-          testFilePath,
-          signal: execaErr.signal,
-        })
-      ) {
-        return {
-          executed: false,
-          passed: false,
-          harnessFailure: true,
-          exitCode,
-          output,
-          durationMs,
-          error: `Reproduction test failed to execute (harness error): ${errorMsg}`,
-        };
-      }
-
-      // 3. Verify genuine exploit assertion failure with stream precedence and path decoupling
-      const knownPaths = [
-        cwd,
-        testFilePath,
-        isAbsolute(testFilePath) ? testFilePath : join(cwd, testFilePath),
-      ];
-
-      // A. Evaluate stderr first (Node.js writes uncaught exceptions and assertions to stderr)
-      if (rawStderr) {
-        const stderrSanitized = sanitizePathLeakage(stripStackTraceFrames(rawStderr), knownPaths);
-        if (isAssertionFailure(stderrSanitized, exitCode)) {
-          return {
-            executed: true,
-            passed: true,
-            exitCode,
-            output,
-            durationMs,
-          };
-        }
-
-        // Check if stderr contains an unhandled runtime error crash that vetoes stdout
-        const hasStderrCrash =
-          /^\s*(?:(?!(?:AssertionError)\b)[A-Z]\w*Error|Error|UnhandledPromiseRejection|UnhandledPromiseRejectionWarning):\s/m.test(
-            stderrSanitized,
-          ) ||
-          /^\s*FATAL ERROR:/m.test(stderrSanitized) ||
-          stderrSanitized.includes("Allocation failed - JavaScript heap out of memory") ||
-          /\(Use `node --trace-uncaught/m.test(rawStderr) ||
-          /\bERR_UNHANDLED_REJECTION\b/.test(rawStderr) ||
-          /^\s*at\s+/m.test(rawStderr) ||
-          /Node\.js v\d+/m.test(rawStderr);
-
-        if (hasStderrCrash) {
-          return {
-            executed: false,
-            passed: false,
-            harnessFailure: true,
-            exitCode,
-            output,
-            durationMs,
-            error: `Reproduction test failed with runtime error instead of exploit assertion: ${errorMsg}`,
-          };
-        }
-      }
-
-      // B. If stderr did not contain a crash, evaluate stdout for explicit assertion tokens
-      if (rawStdout) {
-        const stdoutSanitized = sanitizePathLeakage(stripStackTraceFrames(rawStdout), knownPaths);
-        if (isAssertionFailure(stdoutSanitized, exitCode)) {
-          return {
-            executed: true,
-            passed: true,
-            exitCode,
-            output,
-            durationMs,
-          };
-        }
-      }
-
-      // C. If stderr/stdout did not match but errorMsg contains an assertion (e.g. simulated rejections)
-      if (errorMsg) {
-        const errorMsgSanitized = sanitizePathLeakage(stripStackTraceFrames(errorMsg), knownPaths);
-        if (isAssertionFailure(errorMsgSanitized, exitCode)) {
-          return {
-            executed: true,
-            passed: true,
-            exitCode,
-            output,
-            durationMs,
-          };
-        }
-      }
-
-      // 4. Non-zero exit code without genuine exploit assertion is an unhandled runtime error
-      return {
-        executed: false,
-        passed: false,
-        harnessFailure: true,
-        exitCode,
-        output,
-        durationMs,
-        error: `Reproduction test failed with runtime error instead of exploit assertion: ${errorMsg}`,
-      };
-    }
-
-    // In positive phase, non-zero exit code means exploit still reproduced or target crashed.
+  if (stage === "negative") {
+    // In negative phase, passing cleanly (exitCode 0) means vulnerability was NOT reproduced (false negative).
     return {
       executed: true,
       passed: false,
+      exitCode: 0,
+      output,
+      durationMs,
+      error:
+        "Exploit reproduction test passed on vulnerable target (failed to reproduce vulnerability).",
+    };
+  }
+
+  // In positive phase, exit code 0 means remediation succeeded cleanly.
+  return { executed: true, passed: true, exitCode: 0, output, durationMs };
+}
+
+interface ScriptFailure {
+  exitCode: number;
+  errorMsg: string;
+  rawStdout: string;
+  rawStderr: string;
+  output: string;
+  durationMs: number;
+  cwd: string;
+  testFilePath: string;
+  timedOut: boolean;
+  signal: string | undefined;
+}
+
+/** The script threw: the sandbox refused it, or it ran and exited non-zero. */
+function failedPhase(
+  stage: RunProofOfFixPhaseOptions["stage"],
+  err: unknown,
+  context: { cwd: string; testFilePath: string; durationMs: number },
+): ProofOfFixPhaseResult {
+  const { durationMs } = context;
+  if (err instanceof ProofSandboxError) {
+    // Never a pass, in either stage: a script that did not run proves nothing.
+    return {
+      executed: false,
+      passed: false,
+      harnessFailure: true,
+      exitCode: 1,
+      output: err.message,
+      durationMs,
+      error: err.message,
+    };
+  }
+  const failure = describeScriptFailure(err, context);
+
+  if (stage === "negative") {
+    return negativeFailure(failure);
+  }
+
+  // In positive phase, non-zero exit code means exploit still reproduced or target crashed.
+  return {
+    executed: true,
+    passed: false,
+    exitCode: failure.exitCode,
+    output: failure.output,
+    durationMs,
+    error: `Reproduction test failed on patched target: ${failure.errorMsg}`,
+  };
+}
+
+function describeScriptFailure(
+  err: unknown,
+  context: { cwd: string; testFilePath: string; durationMs: number },
+): ScriptFailure {
+  const execaErr = err as {
+    exitCode?: number;
+    stdout?: string;
+    stderr?: string;
+    message?: string;
+    timedOut?: boolean;
+    signal?: string;
+    code?: string;
+  };
+  const errorMsg = execaErr.message || String(err);
+  const rawStdout = (execaErr.stdout ?? "").trim();
+  const rawStderr = (execaErr.stderr ?? "").trim();
+  const processOutput = [rawStdout, rawStderr].filter(Boolean).join("\n").trim();
+  const output = processOutput || errorMsg;
+  return {
+    exitCode: typeof execaErr.exitCode === "number" ? execaErr.exitCode : 1,
+    errorMsg,
+    rawStdout,
+    rawStderr,
+    output,
+    durationMs: context.durationMs,
+    cwd: context.cwd,
+    testFilePath: context.testFilePath,
+    timedOut:
+      execaErr.timedOut === true ||
+      errorMsg.includes("timed out") ||
+      output.includes("timed out") ||
+      execaErr.code === "ETIMEDOUT",
+    signal: execaErr.signal,
+  };
+}
+
+/** Whether a failing script is a genuine exploit assertion, a hang, or a harness error. */
+function negativeFailure(failure: ScriptFailure): ProofOfFixPhaseResult {
+  const { exitCode, errorMsg, output, durationMs, testFilePath } = failure;
+
+  // 1. Timeout handling
+  if (failure.timedOut) {
+    return {
+      executed: true,
+      passed: false,
+      harnessFailure: true,
       exitCode,
       output,
       durationMs,
-      error: `Reproduction test failed on patched target: ${errorMsg}`,
+      error: "Exploit reproduction test timed out (execution hung).",
     };
   }
+
+  // 2. Reject harness execution failures (syntax error, missing module, missing file, bad CLI, crash)
+  if (isHarnessFailure({ exitCode, output, errorMsg, testFilePath, signal: failure.signal })) {
+    return {
+      executed: false,
+      passed: false,
+      harnessFailure: true,
+      exitCode,
+      output,
+      durationMs,
+      error: `Reproduction test failed to execute (harness error): ${errorMsg}`,
+    };
+  }
+
+  // 3. Verify genuine exploit assertion failure with stream precedence and path decoupling
+  const verdict = assertionVerdict(failure);
+  if (verdict === "assertion") {
+    return { executed: true, passed: true, exitCode, output, durationMs };
+  }
+
+  // 4. Non-zero exit code without genuine exploit assertion is an unhandled runtime error
+  return {
+    executed: false,
+    passed: false,
+    harnessFailure: true,
+    exitCode,
+    output,
+    durationMs,
+    error: `Reproduction test failed with runtime error instead of exploit assertion: ${errorMsg}`,
+  };
+}
+
+/** "assertion" for an exploit assertion failure, "crash" for a runtime crash, "none" otherwise. */
+function assertionVerdict(failure: ScriptFailure): "assertion" | "crash" | "none" {
+  const { cwd, testFilePath, exitCode, rawStderr, rawStdout, errorMsg } = failure;
+  const knownPaths = [
+    cwd,
+    testFilePath,
+    isAbsolute(testFilePath) ? testFilePath : join(cwd, testFilePath),
+  ];
+
+  // A. Evaluate stderr first (Node.js writes uncaught exceptions and assertions to stderr)
+  if (rawStderr) {
+    const stderrSanitized = sanitizePathLeakage(stripStackTraceFrames(rawStderr), knownPaths);
+    if (isAssertionFailure(stderrSanitized, exitCode)) {
+      return "assertion";
+    }
+
+    // Check if stderr contains an unhandled runtime error crash that vetoes stdout
+    const hasStderrCrash =
+      /^\s*(?:(?!(?:AssertionError)\b)[A-Z]\w*Error|Error|UnhandledPromiseRejection|UnhandledPromiseRejectionWarning):\s/m.test(
+        stderrSanitized,
+      ) ||
+      /^\s*FATAL ERROR:/m.test(stderrSanitized) ||
+      stderrSanitized.includes("Allocation failed - JavaScript heap out of memory") ||
+      /\(Use `node --trace-uncaught/m.test(rawStderr) ||
+      /\bERR_UNHANDLED_REJECTION\b/.test(rawStderr) ||
+      /^\s*at\s+/m.test(rawStderr) ||
+      /Node\.js v\d+/m.test(rawStderr);
+
+    if (hasStderrCrash) {
+      return "crash";
+    }
+  }
+
+  // B. If stderr did not contain a crash, evaluate stdout for explicit assertion tokens
+  if (rawStdout) {
+    const stdoutSanitized = sanitizePathLeakage(stripStackTraceFrames(rawStdout), knownPaths);
+    if (isAssertionFailure(stdoutSanitized, exitCode)) {
+      return "assertion";
+    }
+  }
+
+  // C. If stderr/stdout did not match but errorMsg contains an assertion (e.g. simulated rejections)
+  if (errorMsg) {
+    const errorMsgSanitized = sanitizePathLeakage(stripStackTraceFrames(errorMsg), knownPaths);
+    if (isAssertionFailure(errorMsgSanitized, exitCode)) {
+      return "assertion";
+    }
+  }
+
+  return "none";
 }
 
 export interface AssembleProofOfFixParams {

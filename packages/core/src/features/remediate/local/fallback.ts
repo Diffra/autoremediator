@@ -139,7 +139,19 @@ export async function tryPatchFallback(
   }
 
   const { patches, proposal } = generation;
-  const applied = await applyPatchFileTool.execute({
+  const applied = await applyGeneratedPatch(params, proposal, patches);
+  return { usage, result: patchFileResult(params, proposal, applied) };
+}
+
+type GeneratedPatches = Extract<Awaited<ReturnType<typeof generatePatches>>, { ok: true }>;
+type AppliedPatch = Awaited<ReturnType<typeof applyPatchFileTool.execute>>;
+
+function applyGeneratedPatch(
+  params: PatchFallbackParams,
+  proposal: GeneratedPatches["proposal"],
+  patches: GeneratedPatches["patches"],
+): Promise<AppliedPatch> {
+  return applyPatchFileTool.execute({
     packageName: params.packageName,
     vulnerableVersion: params.vulnerableVersion,
     cveId: params.cveId,
@@ -160,34 +172,36 @@ export async function tryPatchFallback(
     requireProofOfFix: params.requireProofOfFix,
     dryRun: params.dryRun,
   });
+}
 
+/** The result of the patch-file strategy, from what the apply tool reported. */
+function patchFileResult(
+  params: PatchFallbackParams,
+  proposal: GeneratedPatches["proposal"],
+  applied: AppliedPatch,
+): PatchResult {
   return {
-    usage,
-    result: {
-      packageName: params.packageName,
-      strategy: "patch-file",
-      fromVersion: params.vulnerableVersion,
-      patchFilePath: applied.patchFilePath ?? applied.patchPath,
-      patchArtifact: applied.patchArtifact,
-      applied: applied.applied,
-      dryRun: applied.dryRun,
-      dependencyScope: params.dependencyScope,
-      confidence: proposal.confidence,
-      riskLevel: proposal.riskLevel,
-      vulnerableRange: params.vulnerableRange,
-      unresolvedReason:
-        !applied.applied && !applied.dryRun
-          ? (applied.unresolvedReason ??
-            (applied.validation?.passed === false
-              ? "patch-validation-failed"
-              : "patch-apply-failed"))
-          : undefined,
-      message: applied.message ?? applied.error ?? "Patch-file strategy finished.",
-      validation:
-        typeof applied.validation?.passed === "boolean"
-          ? { passed: applied.validation.passed, error: applied.validation.error }
-          : undefined,
-      validationPhases: applied.validationPhases,
-    },
+    packageName: params.packageName,
+    strategy: "patch-file",
+    fromVersion: params.vulnerableVersion,
+    patchFilePath: applied.patchFilePath ?? applied.patchPath,
+    patchArtifact: applied.patchArtifact,
+    applied: applied.applied,
+    dryRun: applied.dryRun,
+    dependencyScope: params.dependencyScope,
+    confidence: proposal.confidence,
+    riskLevel: proposal.riskLevel,
+    vulnerableRange: params.vulnerableRange,
+    unresolvedReason:
+      !applied.applied && !applied.dryRun
+        ? (applied.unresolvedReason ??
+          (applied.validation?.passed === false ? "patch-validation-failed" : "patch-apply-failed"))
+        : undefined,
+    message: applied.message ?? applied.error ?? "Patch-file strategy finished.",
+    validation:
+      typeof applied.validation?.passed === "boolean"
+        ? { passed: applied.validation.passed, error: applied.validation.error }
+        : undefined,
+    validationPhases: applied.validationPhases,
   };
 }

@@ -19,7 +19,7 @@ import { join } from "node:path";
 
 import { z } from "zod";
 
-import { sha256 } from "../../shared/hash.js";
+import { canonicalJson, sha256 } from "../../shared/hash.js";
 import { TRACK_RECORD_PATH } from "../../shared/state-paths.js";
 import { sleep } from "../../shared/time.js";
 import {
@@ -38,21 +38,8 @@ const HASH = /^[0-9a-f]{64}$/;
 /** The `prev` of the first event in a chain. */
 const GENESIS = "0".repeat(64);
 
-/** JSON with object keys sorted at every level, so the same event always hashes the same. */
-function canonical(value: unknown): string {
-  if (Array.isArray(value)) return `[${value.map((entry) => canonical(entry)).join(",")}]`;
-  if (value !== null && typeof value === "object") {
-    return `{${Object.entries(value as Record<string, unknown>)
-      .filter(([, entry]) => entry !== undefined)
-      .toSorted(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
-      .map(([key, entry]) => `${JSON.stringify(key)}:${canonical(entry)}`)
-      .join(",")}}`;
-  }
-  return JSON.stringify(value) ?? "null";
-}
-
 /** The hash that the event after `event` carries as its `prev`. */
-const hashOf = (event: TrackEvent): string => sha256(canonical(event));
+const hashOf = (event: TrackEvent): string => sha256(canonicalJson(event));
 
 /** Give every event the hash of the one before it. */
 function chained(events: readonly TrackEvent[]): TrackEvent[] {

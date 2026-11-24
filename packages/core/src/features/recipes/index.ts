@@ -132,8 +132,9 @@ export async function applyRecipe(
   const record = loadOpen(store, options.runId, options.attemptId);
   const plan = store.readPlan(options.runId);
   const item = plan?.items.find((candidate) => candidate.itemId === record.itemId);
-  if (!plan || !item)
+  if (!plan || !item) {
     throw new Error(`Attempt ${record.attemptId} refers to a plan item that no longer exists.`);
+  }
 
   const found = discover(cwd, record.worktreePath, plan.options.policy);
   const entry = found.recipes.find((candidate) => candidate.id === options.recipeId);

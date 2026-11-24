@@ -1,7 +1,7 @@
 import semver from "semver";
 
 import { fetchOsvVuln, parseOsvVuln } from "../intelligence/sources/osv.js";
-import type { AdvisoryAffected, AdvisoryLookup } from "./types.js";
+import type { AdvisoryAffected, AdvisoryContext, AdvisoryLookup } from "./types.js";
 
 interface OsvRecord {
   details?: string;
@@ -111,4 +111,28 @@ export function choosePackage(
       ? "The advisory names no npm package. Pass package."
       : `The advisory affects several packages (${names.join(", ")}). Pass package.`,
   );
+}
+
+/** The advisory the agent is shown: what OSV says, with the caller's own text put first. */
+export function contextFor(
+  id: string,
+  looked: AdvisoryLookup | undefined,
+  advisoryText: string | undefined,
+): AdvisoryContext {
+  if (looked && !advisoryText) return looked.context;
+  if (looked && advisoryText) {
+    return {
+      ...looked.context,
+      details: `${advisoryText}\n\n${looked.context.details ?? ""}`.trim(),
+    };
+  }
+  const text = advisoryText ?? "";
+  return {
+    id,
+    summary: text.split("\n")[0]?.slice(0, 300) ?? id,
+    details: text,
+    cwes: [],
+    references: [],
+    source: "user",
+  };
 }

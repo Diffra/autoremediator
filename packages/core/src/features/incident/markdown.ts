@@ -42,12 +42,7 @@ function occurrenceRow(name: string, occurrence: Occurrence): string {
     occurrence.via.length > 0
       ? occurrence.via.map((hop) => code(hop)).join(" → ")
       : "nothing the manifests ask for leads here";
-  const scripts =
-    occurrence.installScript === "unknown"
-      ? "unknown"
-      : occurrence.installScript
-        ? "**yes**"
-        : "no";
+  const scripts = installScriptLabel(occurrence.installScript);
   return `| ${code(`${name}@${occurrence.version}`)} | ${occurrence.scope} | ${kind} | ${via} | ${scripts} | ${code(occurrence.lockfile)} |`;
 }
 
@@ -56,12 +51,12 @@ function windowLines(window: VersionWindow): string[] {
     window.entered.length > 0
       ? window.entered.map((commit) => commitText(commit)).join(", ")
       : "before the history that was read";
-  const left =
-    window.left.length > 0
-      ? window.left.map((commit) => commitText(commit)).join(", ")
-      : window.presentAtHead
-        ? "**still present at HEAD**"
-        : "not found leaving";
+  let left = "not found leaving";
+  if (window.left.length > 0) {
+    left = window.left.map((commit) => commitText(commit)).join(", ");
+  } else if (window.presentAtHead) {
+    left = "**still present at HEAD**";
+  }
   return [
     `- ${code(window.version)} in ${code(window.lockfile)}`,
     `  - entered: ${entered}`,
@@ -77,9 +72,46 @@ function windowLines(window: VersionWindow): string[] {
 /** The incident report as markdown, safe to commit or paste into a ticket. */
 export function renderIncidentMarkdown(report: IncidentReport): string {
   const out: string[] = [];
-  const { target, exposure } = report;
-  const out_ = (...lines: string[]): void => void out.push(...lines);
+  const emit: Emit = (...lines) => void out.push(...lines);
 
+  describeTarget(report, emit);
+  const everPresent = report.history?.packages.some((entry) => entry.windows.length > 0) ?? false;
+  emit("## Summary", "");
+  emit(exposureLine(report.exposure.exposed, everPresent), "");
+
+  exposureSection(report, emit);
+  historySection(report, emit);
+  rollbackSection(report, emit);
+  rotationSection(report, emit);
+
+  if (report.notes.length > 0) {
+    emit("## Notes", "");
+    for (const note of report.notes) emit(`- ${prose(note)}`);
+    emit("");
+  }
+  return `${out.join("\n").trimEnd()}\n`;
+}
+
+function installScriptLabel(value: boolean | "unknown"): string {
+  if (value === "unknown") {
+    return "unknown";
+  }
+  return value ? "**yes**" : "no";
+}
+
+function exposureLine(exposed: boolean, everPresent: boolean): string {
+  if (exposed) {
+    return "- **An affected version is locked or installed in this project now.**";
+  }
+  return everPresent
+    ? "- No affected version is locked now, but one was in this repository's history (see History)."
+    : "- No affected version is locked here, and none was found in the lockfile history that was read.";
+}
+
+type Emit = (...lines: string[]) => void;
+
+function describeTarget(report: IncidentReport, out_: Emit): void {
+  const { target } = report;
   out_(
     `# Incident report: ${code(target.input.length > 120 ? `${target.input.slice(0, 117)}...` : target.input)}`,
     "",
@@ -96,18 +128,10 @@ export function renderIncidentMarkdown(report: IncidentReport): string {
       target.affected.map((entry) => `${code(entry.name)} ${code(entry.range)}`).join("; "),
     "",
   );
+}
 
-  const everPresent = report.history?.packages.some((entry) => entry.windows.length > 0) ?? false;
-  out_("## Summary", "");
-  out_(
-    exposure.exposed
-      ? "- **An affected version is locked or installed in this project now.**"
-      : everPresent
-        ? "- No affected version is locked now, but one was in this repository's history (see History)."
-        : "- No affected version is locked here, and none was found in the lockfile history that was read.",
-    "",
-  );
-
+function exposureSection(report: IncidentReport, out_: Emit): void {
+  const { exposure } = report;
   out_("## 1. Exposure now", "");
   const anyOccurrence = exposure.packages.some((entry) => entry.occurrences.length > 0);
   if (anyOccurrence) {
@@ -116,16 +140,18 @@ export function renderIncidentMarkdown(report: IncidentReport): string {
       "| --- | --- | --- | --- | --- | --- |",
     );
     for (const entry of exposure.packages) {
-      for (const occurrence of entry.occurrences)
+      for (const occurrence of entry.occurrences) {
         out_(occurrenceRow(entry.packageName, occurrence));
+      }
     }
     out_("");
   } else {
     out_("No affected version is in the lockfiles.", "");
   }
   for (const entry of exposure.packages) {
-    if (entry.declared)
+    if (entry.declared) {
       out_(`- ${code(entry.packageName)} is declared in package.json as ${code(entry.declared)}.`);
+    }
     if (entry.installed && entry.installed.length > 0) {
       out_(
         `- Installed in node_modules: ${entry.installed.map((copy) => code(`${entry.packageName}@${copy.version}`)).join(", ")}.`,
@@ -134,7 +160,9 @@ export function renderIncidentMarkdown(report: IncidentReport): string {
   }
   for (const note of exposure.notes) out_(`- ${prose(note)}`);
   out_("");
+}
 
+function historySection(report: IncidentReport, out_: Emit): void {
   out_("## 2. History", "");
   if (!report.history) {
     out_("History was not read (turned off).", "");
@@ -148,8 +176,9 @@ export function renderIncidentMarkdown(report: IncidentReport): string {
     );
     for (const entry of report.history.packages) {
       out_(`### ${code(entry.packageName)}`, "");
-      if (entry.windows.length === 0)
+      if (entry.windows.length === 0) {
         out_("No affected version appears in the lockfile history.", "");
+      }
       for (const window of entry.windows) out_(...windowLines(window));
       if (entry.windows.length > 0) out_("");
       if (entry.manifestChanges.length > 0) {
@@ -163,13 +192,16 @@ export function renderIncidentMarkdown(report: IncidentReport): string {
       }
     }
     for (const note of report.history.notes) out_(`- ${prose(note)}`);
-    if (report.history.unreadable > 0)
+    if (report.history.unreadable > 0) {
       out_(
         `- ${report.history.unreadable} lockfile version(s) could not be read and are not counted.`,
       );
+    }
     out_("");
   }
+}
 
+function rollbackSection(report: IncidentReport, out_: Emit): void {
   out_("## 3. Roll back to the last safe version", "");
   if (report.rollback.proposals.length === 0) {
     out_("Nothing to roll back: no affected version is locked.", "");
@@ -212,7 +244,9 @@ export function renderIncidentMarkdown(report: IncidentReport): string {
   }
   for (const note of report.rollback.notes) out_(`- ${prose(note)}`);
   if (report.rollback.notes.length > 0) out_("");
+}
 
+function rotationSection(report: IncidentReport, out_: Emit): void {
   if (report.secrets) {
     const secrets = report.secrets;
     out_("## 4. Rotation checklist", "", `> ${secrets.disclaimer}`, "");
@@ -238,16 +272,18 @@ export function renderIncidentMarkdown(report: IncidentReport): string {
       }
     }
     for (const file of secrets.containers) {
-      if (file.installs)
+      if (file.installs) {
         out_(`- ${code(file.file)} installs dependencies while building an image.`);
+      }
     }
     for (const file of secrets.npmrc) {
       out_(
         `- ${code(file.file)}: ${file.envNames.length > 0 ? `reads ${list(file.envNames)}` : "no token variable"}${file.literalCredential ? "; **a credential is written into the file itself**" : ""}.`,
       );
     }
-    for (const file of secrets.lifecycle)
+    for (const file of secrets.lifecycle) {
       out_(`- ${code(file.file)} defines install-time scripts: ${list(file.scripts)}.`);
+    }
     out_("");
     out_("Generic steps:", "");
     for (const item of secrets.guidance) out_(`- [ ] ${item.text}`);
@@ -262,11 +298,4 @@ export function renderIncidentMarkdown(report: IncidentReport): string {
       "",
     );
   }
-
-  if (report.notes.length > 0) {
-    out_("## Notes", "");
-    for (const note of report.notes) out_(`- ${prose(note)}`);
-    out_("");
-  }
-  return `${out.join("\n").trimEnd()}\n`;
 }

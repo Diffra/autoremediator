@@ -46,8 +46,9 @@ const NON_REGISTRY = /^(?:[a-z][a-z0-9+.-]*:|\.{0,2}\/|~\/|[\w.-]+\/[\w.-]+$)/i;
 export function specForChange(change: DeltaDependencyChange): { spec: string } | { skip: string } {
   const version = change.newVersion?.trim();
   if (!version) return { skip: "no version" };
-  if (LOCAL_PROTOCOL.test(version))
+  if (LOCAL_PROTOCOL.test(version)) {
     return { skip: `${version.split(":")[0]}: dependencies are not registry packages` };
+  }
   if (version.startsWith("npm:")) return { spec: `${change.packageName}@${version}` };
   if (NON_REGISTRY.test(version)) return { spec: version };
   return { spec: `${change.packageName}@${version}` };
@@ -122,7 +123,14 @@ export async function guardGitDiff(
     baseRef,
     checked: reports.length,
     skipped,
-    verdict: code === 4 ? "block" : code === 3 ? "warn" : "allow",
+    verdict: verdictOfExitCode(code),
     reports,
   };
+}
+
+function verdictOfExitCode(code: number): "block" | "warn" | "allow" {
+  if (code === 4) {
+    return "block";
+  }
+  return code === 3 ? "warn" : "allow";
 }

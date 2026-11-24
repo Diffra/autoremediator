@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { evaluate, effectiveLevel, nextPromotion, signalsFor, transitionsOf } from "./compute.js";
+import { evaluate, effectiveLevel, nextPromotion, signalsFor } from "./compute.js";
+import { transitionsOf } from "./transitions.js";
 import {
   type AutonomyConfig,
   type AutonomyLevel,

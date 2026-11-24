@@ -72,4 +72,16 @@ describe("parseYarnAuditJsonFromString", () => {
       severity: "MEDIUM",
     });
   });
+
+  it("reads a summary-only report as no findings", () => {
+    const summary = JSON.stringify({ type: "auditSummary", data: { vulnerabilities: {} } });
+    expect(parseYarnAuditJsonFromString(summary)).toEqual([]);
+  });
+
+  it.each(["", "garbage", '{"foo":1}', '{"type":"info","data":"x"}'])(
+    "rejects %j instead of reporting zero findings",
+    (content) => {
+      expect(() => parseYarnAuditJsonFromString(content, "yarn.json")).toThrow(/yarn\.json/);
+    },
+  );
 });

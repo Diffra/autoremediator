@@ -45,8 +45,9 @@ export function rejectedUpgradeEntry(
   verification: VerificationResult | undefined,
 ): NewMemoryEntry | undefined {
   const check = verification?.failedCheck;
-  if (!verification || verification.passed || !check || !UPGRADE_CHECKS.has(check))
+  if (!verification || verification.passed || !check || !UPGRADE_CHECKS.has(check)) {
     return undefined;
+  }
   if (semver.valid(upgrade.toVersion) === null) return undefined;
   return {
     kind: "rejected-upgrade",

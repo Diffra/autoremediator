@@ -127,10 +127,17 @@ export function installScriptOf(
       typeof manifest["scripts"] === "object" && manifest["scripts"] !== null
         ? (manifest["scripts"] as Record<string, unknown>)
         : {};
-    if (["preinstall", "install", "postinstall"].some((hook) => typeof scripts[hook] === "string"))
+    if (
+      ["preinstall", "install", "postinstall"].some((hook) => typeof scripts[hook] === "string")
+    ) {
       return true;
-    if (manifest["gypfile"] === true || existsSync(join(cwd, "node_modules", name, "binding.gyp")))
+    }
+    if (
+      manifest["gypfile"] === true ||
+      existsSync(join(cwd, "node_modules", name, "binding.gyp"))
+    ) {
       return true;
+    }
     return false;
   }
   return fromLock ?? "unknown";

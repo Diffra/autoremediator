@@ -194,8 +194,9 @@ function loadOne(id: string, tasksDir: string, seen: string[] = []): LoadedTask 
     );
   }
   const file = parsed.data;
-  if (file.id !== id)
+  if (file.id !== id) {
     throw new Error(`${taskPath}: id "${file.id}" does not match its directory "${id}"`);
+  }
 
   if (file.base !== undefined) {
     if (seen.includes(file.base) || file.base === id) throw new Error(`Task ${id}: base cycle`);

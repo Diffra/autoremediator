@@ -115,8 +115,9 @@ const constraintsOf = (context: CheckContext) => ({
 /** Only the files a dependency change may touch (plus the project's source, if allowed) changed. */
 const scope: CheckFn = async (context) => {
   const files = await context.changedFiles();
-  if (files === undefined)
+  if (files === undefined) {
     return skip("not a git repository, so the changed files cannot be listed");
+  }
 
   const violations: string[] = [];
   for (const file of files) {
@@ -173,7 +174,14 @@ const policyCheck: CheckFn = async (context) => {
     : pass(`${context.changes().length} dependency change(s) allowed by policy`);
 };
 
-/** Every version the change introduces passes the supply-chain gate (age, scripts, provenance). */
+/** Specs that point at files in the repository: nothing is fetched, so there is nothing to vet. */
+const LOCAL_SPEC = /^(?:file|link|portal|workspace):/;
+
+/**
+ * Every version the change introduces passes the supply-chain gate (age, scripts, provenance).
+ * A declaration that is not a registry version range (a git or URL source, an alias, a tag) has no
+ * version to look up, so the gate cannot vouch for it and the check fails instead of passing it by.
+ */
 const supplyChain: CheckFn = async (context) => {
   if (context.options.offline) return skip("offline: the registry is not consulted");
   const constraints = constraintsOf(context);
@@ -184,8 +192,15 @@ const supplyChain: CheckFn = async (context) => {
   let checked = 0;
   for (const change of context.changes()) {
     if (change.to === undefined) continue;
-    const version = versionOf(change.to.split("=").at(-1)!);
-    if (!version) continue;
+    const spec = change.to.split("=").at(-1) ?? change.to;
+    if (LOCAL_SPEC.test(spec)) continue;
+    const version = versionOf(spec);
+    if (!version) {
+      problems.push(
+        `${change.name}: "${spec}" is not a registry version range and cannot be vetted`,
+      );
+      continue;
+    }
     const policy = withCooldown(constraints.supplyChainPolicy, cooldown, change.name);
     const verdict = await verifyPackageTrust(change.name, version, policy, registry);
     checked += 1;
@@ -223,8 +238,9 @@ const vulnGone: CheckFn = async (context) => {
   if (context.request.advisories.length === 0) return skip("no advisory to check against");
 
   const inventory = await context.inventory();
-  if ("error" in inventory)
+  if ("error" in inventory) {
     return fail("the installed packages could not be listed", [inventory.error]);
+  }
 
   const allowed = new Set(context.request.expectedRemaining ?? []);
   const remaining: string[] = [];
@@ -289,10 +305,11 @@ const proofOfFix: CheckFn = async (context) => {
     proofOfFix: proof,
     reproductionTest,
   });
-  if (!prepared.testFilePath)
+  if (!prepared.testFilePath) {
     return required
       ? fail("the reproduction test could not be found")
       : skip("no reproduction test found");
+  }
 
   const phase = await runProofOfFixPhase({
     stage: "positive",

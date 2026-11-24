@@ -21,8 +21,12 @@ afterEach(() => {
   rmSync(dir, { recursive: true, force: true });
 });
 
-const urlOf = (input: string | URL | Request): string =>
-  typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+function urlOf(input: string | URL | Request): string {
+  if (typeof input === "string") {
+    return input;
+  }
+  return input instanceof URL ? input.href : input.url;
+}
 
 const write = (path: string, content: string) => {
   mkdirSync(join(dir, path, ".."), { recursive: true });
@@ -123,8 +127,9 @@ function stubNetwork(options: { githubStatus?: number; githubRemaining?: string 
         },
       });
     }
-    if (url.endsWith("pkg-1.0.1.tgz") || url.endsWith("pkg-1.0.2.tgz"))
+    if (url.endsWith("pkg-1.0.1.tgz") || url.endsWith("pkg-1.0.2.tgz")) {
       return new Response(tarballWithDocs);
+    }
     if (url === "https://registry.npmjs.org/gone") return json({}, 404);
     if (url === "https://api.osv.dev/v1/query") {
       expect(init?.method).toBe("POST");

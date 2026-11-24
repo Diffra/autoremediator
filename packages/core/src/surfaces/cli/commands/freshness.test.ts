@@ -22,8 +22,9 @@ let stdout: string;
 beforeAll(async () => {
   scratch = mkdtempSync(join(tmpdir(), "freshness-cli-"));
   await registry.start();
-  for (const version of ["1.0.0", "1.3.0", "2.0.0"])
+  for (const version of ["1.0.0", "1.3.0", "2.0.0"]) {
     await registry.publish({ name: "lib", version });
+  }
 });
 afterAll(async () => {
   await registry.stop();

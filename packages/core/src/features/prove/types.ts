@@ -119,3 +119,11 @@ export interface ReproductionAgent {
 }
 
 export type ModelResolver = (spec: string) => Promise<LanguageModel>;
+
+export interface TrialSummary {
+  attempt: number;
+  accepted: boolean;
+  stage: TrialResult["stage"];
+  reason: string;
+  scriptSha256: string;
+}

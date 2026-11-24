@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
+import { fileAction } from "../../shared/file-action.js";
 import {
   AGENTS_MD_SECTION,
   COPILOT_AGENT_PATH,
@@ -58,8 +59,7 @@ function toChange(
       after: before ?? "",
     };
   }
-  const action =
-    before === undefined ? "create" : before === merged.content ? "unchanged" : "update";
+  const action = fileAction(before, merged.content);
   return {
     path,
     action,
@@ -100,8 +100,15 @@ function owned(
       after: before,
     };
   }
-  const action = before === undefined ? "create" : before === content ? "unchanged" : "update";
+  const action = fileAction(before, content);
   return { path, action, reason, ...(before === undefined ? {} : { before }), after: content };
+}
+
+interface HostContext {
+  cwd: string;
+  guard: boolean;
+  hosts: AgentHost[];
+  entry: ReturnType<typeof mcpServerEntry>;
 }
 
 function hostChanges(
@@ -110,108 +117,125 @@ function hostChanges(
   guard: boolean,
   hosts: AgentHost[],
 ): FileChange[] {
-  const entry = mcpServerEntry();
-  const json = (
-    path: string,
-    key: "mcpServers" | "servers",
-    extra: Record<string, unknown> = {},
-  ) => {
-    const before = readIfExists(cwd, path);
-    return toChange(
-      path,
+  return HOST_BUILDERS[host]({ cwd, guard, hosts, entry: mcpServerEntry() });
+}
+
+function jsonMcpChange(
+  context: HostContext,
+  path: string,
+  key: "mcpServers" | "servers",
+  extra: Record<string, unknown> = {},
+): FileChange {
+  const before = readIfExists(context.cwd, path);
+  return toChange(
+    path,
+    "connect the Autoremediator MCP server",
+    before,
+    mergeJsonMcpConfig(before, key, context.entry, extra),
+  );
+}
+
+function copilotHookChanges(context: HostContext): FileChange[] {
+  const before = readIfExists(context.cwd, COPILOT_HOOKS_PATH);
+  return [
+    toChange(
+      COPILOT_HOOKS_PATH,
+      "check package installs with guard before Copilot runs shell commands",
+      before,
+      mergeHooksFile(before, "preToolUse", copilotGuardHookEntry()),
+    ),
+  ];
+}
+
+function claudeCodeChanges(context: HostContext): FileChange[] {
+  const { cwd, guard } = context;
+  const changes = [
+    jsonMcpChange(context, ".mcp.json", "mcpServers"),
+    ...SKILLS.map((skill) => {
+      const path = `.claude/skills/${skill.name}/SKILL.md`;
+      return owned(
+        path,
+        "teach Claude Code the safe remediation steps",
+        readIfExists(cwd, path),
+        renderSkill(skill),
+      );
+    }),
+  ];
+  if (guard) {
+    const before = readIfExists(cwd, ".claude/settings.json");
+    changes.push(
+      toChange(
+        ".claude/settings.json",
+        "check package installs with guard before Claude Code runs them",
+        before,
+        mergeClaudeGuardHook(before, guardHookCommand()),
+      ),
+    );
+  }
+  return changes;
+}
+
+function cursorChanges(context: HostContext): FileChange[] {
+  const { cwd, guard } = context;
+  const changes = [
+    jsonMcpChange(context, ".cursor/mcp.json", "mcpServers"),
+    owned(
+      CURSOR_RULE_PATH,
+      "teach Cursor the safe remediation steps",
+      readIfExists(cwd, CURSOR_RULE_PATH),
+      cursorRuleContent(),
+    ),
+  ];
+  if (guard) {
+    const before = readIfExists(cwd, CURSOR_HOOKS_PATH);
+    changes.push(
+      toChange(
+        CURSOR_HOOKS_PATH,
+        "check package installs with guard before Cursor runs them",
+        before,
+        mergeHooksFile(before, "beforeShellExecution", cursorGuardHookEntry()),
+      ),
+    );
+  }
+  return changes;
+}
+
+function codexChanges(context: HostContext): FileChange[] {
+  const before = readIfExists(context.cwd, ".codex/config.toml");
+  return [
+    toChange(
+      ".codex/config.toml",
       "connect the Autoremediator MCP server",
       before,
-      mergeJsonMcpConfig(before, key, entry, extra),
-    );
-  };
-  const copilotHooks = (): FileChange[] => {
-    const before = readIfExists(cwd, COPILOT_HOOKS_PATH);
-    return [
-      toChange(
-        COPILOT_HOOKS_PATH,
-        "check package installs with guard before Copilot runs shell commands",
-        before,
-        mergeHooksFile(before, "preToolUse", copilotGuardHookEntry()),
-      ),
-    ];
-  };
-  const builders: Record<AgentHost, () => FileChange[]> = {
-    "claude-code": () => [
-      json(".mcp.json", "mcpServers"),
-      ...SKILLS.map((skill) => {
-        const path = `.claude/skills/${skill.name}/SKILL.md`;
-        return owned(
-          path,
-          "teach Claude Code the safe remediation steps",
-          readIfExists(cwd, path),
-          renderSkill(skill),
-        );
-      }),
-      ...(guard
-        ? [
-            (() => {
-              const before = readIfExists(cwd, ".claude/settings.json");
-              return toChange(
-                ".claude/settings.json",
-                "check package installs with guard before Claude Code runs them",
-                before,
-                mergeClaudeGuardHook(before, guardHookCommand()),
-              );
-            })(),
-          ]
-        : []),
-    ],
-    cursor: () => [
-      json(".cursor/mcp.json", "mcpServers"),
-      owned(
-        CURSOR_RULE_PATH,
-        "teach Cursor the safe remediation steps",
-        readIfExists(cwd, CURSOR_RULE_PATH),
-        cursorRuleContent(),
-      ),
-      ...(guard
-        ? [
-            (() => {
-              const before = readIfExists(cwd, CURSOR_HOOKS_PATH);
-              return toChange(
-                CURSOR_HOOKS_PATH,
-                "check package installs with guard before Cursor runs them",
-                before,
-                mergeHooksFile(before, "beforeShellExecution", cursorGuardHookEntry()),
-              );
-            })(),
-          ]
-        : []),
-    ],
-    // The Copilot harness in VS Code reads the same repository hook files as Copilot itself.
-    vscode: () => [
-      json(".vscode/mcp.json", "servers", { type: "stdio" }),
-      ...(guard && !hosts.includes("copilot") ? copilotHooks() : []),
-    ],
-    gemini: () => [json(".gemini/settings.json", "mcpServers")],
-    codex: () => {
-      const before = readIfExists(cwd, ".codex/config.toml");
-      return [
-        toChange(
-          ".codex/config.toml",
-          "connect the Autoremediator MCP server",
-          before,
-          mergeCodexToml(before, entry),
-        ),
-      ];
-    },
-    copilot: () => [
-      owned(
-        COPILOT_AGENT_PATH,
-        "add a Copilot custom agent for dependency remediation",
-        readIfExists(cwd, COPILOT_AGENT_PATH),
-        copilotAgentContent(),
-      ),
-      ...(guard ? copilotHooks() : []),
-    ],
-  };
-  return builders[host]();
+      mergeCodexToml(before, context.entry),
+    ),
+  ];
 }
+
+function copilotChanges(context: HostContext): FileChange[] {
+  return [
+    owned(
+      COPILOT_AGENT_PATH,
+      "add a Copilot custom agent for dependency remediation",
+      readIfExists(context.cwd, COPILOT_AGENT_PATH),
+      copilotAgentContent(),
+    ),
+    ...(context.guard ? copilotHookChanges(context) : []),
+  ];
+}
+
+const HOST_BUILDERS: Record<AgentHost, (context: HostContext) => FileChange[]> = {
+  "claude-code": claudeCodeChanges,
+  cursor: cursorChanges,
+  // The Copilot harness in VS Code reads the same repository hook files as Copilot itself.
+  vscode: (context) => [
+    jsonMcpChange(context, ".vscode/mcp.json", "servers", { type: "stdio" }),
+    ...(context.guard && !context.hosts.includes("copilot") ? copilotHookChanges(context) : []),
+  ],
+  gemini: (context) => [jsonMcpChange(context, ".gemini/settings.json", "mcpServers")],
+  codex: codexChanges,
+  copilot: copilotChanges,
+};
 
 /**
  * The pnpmfile that checks new dependencies. Ours is refreshed; any other `.pnpmfile.cjs` or a
@@ -241,7 +265,7 @@ function pnpmfileChange(cwd: string): FileChange {
   }
   return {
     path: PNPMFILE_PATH,
-    action: before === undefined ? "create" : before === content ? "unchanged" : "update",
+    action: fileAction(before, content),
     reason,
     ...(before === undefined ? {} : { before }),
     after: content,

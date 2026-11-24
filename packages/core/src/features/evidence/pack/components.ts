@@ -238,8 +238,9 @@ function fromBun(content: string, facts: Map<string, LockedPackageFacts>): void 
     const integrity = entry.find(
       (part, index) => index >= 3 && typeof part === "string" && /^sha\d+-/.test(part),
     );
-    if (typeof integrity === "string")
+    if (typeof integrity === "string") {
       facts.set(factKey(ident.slice(0, at), version), { integrity });
+    }
   }
 }
 
@@ -250,9 +251,9 @@ function fromBun(content: string, facts: Map<string, LockedPackageFacts>): void 
 export function readLockFacts(lockfile: string, content: string): Map<string, LockedPackageFacts> {
   const facts = new Map<string, LockedPackageFacts>();
   try {
-    if (lockfile === "package-lock.json" || lockfile === "npm-shrinkwrap.json")
+    if (lockfile === "package-lock.json" || lockfile === "npm-shrinkwrap.json") {
       fromNpm(content, facts);
-    else if (lockfile === "pnpm-lock.yaml") fromPnpm(content, facts);
+    } else if (lockfile === "pnpm-lock.yaml") fromPnpm(content, facts);
     else if (lockfile === "yarn.lock") fromYarn(content, facts);
     else if (lockfile === "bun.lock") fromBun(content, facts);
   } catch {

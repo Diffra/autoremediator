@@ -44,8 +44,9 @@ export function removeCommand(
 ): string[] {
   // Names come from package.json keys; one that looks like an option must never reach the package manager.
   for (const name of names) {
-    if (!PACKAGE_NAME.test(name))
+    if (!PACKAGE_NAME.test(name)) {
       throw new Error(`Refusing to remove "${name.slice(0, 60)}": not a valid package name.`);
+    }
   }
   if (packageManager === "pnpm") {
     // `--ignore-scripts`: removing a package must not run anyone's lifecycle scripts.
@@ -85,12 +86,13 @@ export const defaultDietDeps: DietDeps = {
     const [command, ...args] = resolveInstallCommand(packageManager, {
       enforceFrozenLockfile: true,
     });
-    if (command)
+    if (command) {
       await safeExeca(command, args, {
         cwd: root,
         stdio: "pipe",
         timeoutMs: LONG_RUNNING_TIMEOUT_MS,
       });
+    }
   },
   verify,
 };
@@ -183,20 +185,9 @@ export async function removeUnusedDependenciesWith(
       };
     }
 
-    const verification = await deps.verify({
-      cwd: report.root,
-      packageManager,
-      ...(options.policy ? { policy: options.policy } : {}),
-      baseFiles: before.fileSnapshots,
-      statusBefore: before.isGit ? (before.gitStatusBefore ?? []) : undefined,
-      advisories: [],
-      options: {
-        runTests: options.runTests ?? false,
-        typecheck: options.typecheck ?? true,
-        ...(options.constraints ? { constraints: options.constraints } : {}),
-      },
-      checks: ["scope", "policy", "install", "typecheck", "tests"],
-    });
+    const verification = await deps.verify(
+      verificationRequest(options, report.root, packageManager, before),
+    );
 
     if (!verification.passed) {
       const failed = verification.checks.find((check) => check.name === verification.failedCheck);
@@ -214,10 +205,7 @@ export async function removeUnusedDependenciesWith(
       status: "removed",
       removals,
       verification,
-      message: `Removed ${removals.length} unused ${removals.length === 1 ? "dependency" : "dependencies"}; verified by ${verification.checks
-        .filter((check) => check.status === "passed")
-        .map((check) => check.name)
-        .join(", ")}.`,
+      message: removedMessage(removals.length, verification.checks),
       report,
     };
   });
@@ -227,4 +215,34 @@ export function removeUnusedDependencies(
   options: RemoveUnusedDependenciesOptions = {},
 ): Promise<DietApplyResult> {
   return removeUnusedDependenciesWith(options, defaultDietDeps);
+}
+
+function verificationRequest(
+  options: RemoveUnusedDependenciesOptions,
+  root: string,
+  packageManager: Parameters<DietDeps["verify"]>[0]["packageManager"],
+  before: Awaited<ReturnType<typeof createProjectSnapshot>>,
+): Parameters<DietDeps["verify"]>[0] {
+  return {
+    cwd: root,
+    packageManager,
+    ...(options.policy ? { policy: options.policy } : {}),
+    baseFiles: before.fileSnapshots,
+    statusBefore: before.isGit ? (before.gitStatusBefore ?? []) : undefined,
+    advisories: [],
+    options: {
+      runTests: options.runTests ?? false,
+      typecheck: options.typecheck ?? true,
+      ...(options.constraints ? { constraints: options.constraints } : {}),
+    },
+    checks: ["scope", "policy", "install", "typecheck", "tests"],
+  };
+}
+
+function removedMessage(
+  count: number,
+  checks: readonly { name: string; status: string }[],
+): string {
+  const passed = checks.filter((check) => check.status === "passed").map((check) => check.name);
+  return `Removed ${count} unused ${count === 1 ? "dependency" : "dependencies"}; verified by ${passed.join(", ")}.`;
 }

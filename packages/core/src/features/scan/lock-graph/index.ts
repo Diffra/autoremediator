@@ -115,11 +115,15 @@ export function findOccurrences(
 
   const found: PackageOccurrence[] = [];
   for (const node of hits) {
-    const scope = prod.has(node.id)
-      ? "production"
-      : dev.has(node.id)
-        ? "development"
-        : "unreferenced";
+    let scope: PackageOccurrence["scope"] = "unreferenced";
+    let via: string[] = [];
+    if (prod.has(node.id)) {
+      scope = "production";
+      via = chain(prod, node.id);
+    } else if (dev.has(node.id)) {
+      scope = "development";
+      via = chain(dev, node.id);
+    }
     const workspaces = graph.roots
       .filter((root) => root.prod.includes(node.id) || root.dev.includes(node.id))
       .map((root) => root.workspace);
@@ -130,12 +134,7 @@ export function findOccurrences(
       direct: workspaces.length > 0,
       scope,
       workspaces,
-      via:
-        scope === "production"
-          ? chain(prod, node.id)
-          : scope === "development"
-            ? chain(dev, node.id)
-            : [],
+      via,
       dependents: (dependentsOf.get(node.id) ?? []).slice(0, 5).map((id) => label(graph, id)),
     };
     if (node.installScript) occurrence.installScript = true;

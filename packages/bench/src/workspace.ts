@@ -114,8 +114,9 @@ export async function materialize(
       env,
     },
   );
-  if (install.code !== 0)
+  if (install.code !== 0) {
     throw new Error(`Baseline npm install failed for ${task.id}:\n${install.stderr}`);
+  }
   await mustRun("git", ["add", "--all"], { cwd: dir, env });
   await mustRun("git", ["commit", "--quiet", "-m", "baseline"], { cwd: dir, env });
   const baseline = (await mustRun("git", ["rev-parse", "HEAD"], { cwd: dir, env })).stdout.trim();

@@ -1,6 +1,8 @@
+import type http from "node:http";
+
 import { describe, expect, it } from "vitest";
 
-import { getRoleForToken } from "./http-auth.js";
+import { authorizeRole, createSignedJwt, getRoleForToken } from "./http-auth.js";
 
 describe("static token lookup", () => {
   const configured = "admin:s3cret-token,reader:read-only-token";
@@ -31,5 +33,36 @@ describe("static token lookup", () => {
 
   it("is development mode, with every request an admin, when nothing is configured", () => {
     expect(getRoleForToken("anything", undefined, undefined)).toBe("admin");
+  });
+});
+
+describe("authorizeRole with an explicit environment", () => {
+  const request = (token: string): http.IncomingMessage =>
+    ({ headers: { authorization: `Bearer ${token}` } }) as http.IncomingMessage;
+
+  it("checks the token against the tokens of that environment, not the process's", () => {
+    const env = { AUTOREMEDIATOR_API_TOKENS: "reader:good-token" };
+
+    expect(authorizeRole(request("bad-token"), "reader", "GET /x", env)).toMatchObject({
+      ok: false,
+      status: 401,
+    });
+    expect(authorizeRole(request("good-token"), "reader", "GET /x", env)).toEqual({ ok: true });
+    expect(authorizeRole(request("good-token"), "admin", "POST /x", env)).toMatchObject({
+      ok: false,
+      status: 403,
+    });
+  });
+
+  it("verifies a JWT against the secret of that environment", () => {
+    const env = { AUTOREMEDIATOR_JWT_SECRET: "env-secret" };
+    const good = createSignedJwt({ role: "admin" }, "env-secret");
+    const forged = createSignedJwt({ role: "admin" }, "other-secret");
+
+    expect(authorizeRole(request(good), "admin", "POST /x", env)).toEqual({ ok: true });
+    expect(authorizeRole(request(forged), "admin", "POST /x", env)).toMatchObject({
+      ok: false,
+      status: 401,
+    });
   });
 });

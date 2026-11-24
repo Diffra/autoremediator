@@ -28,8 +28,9 @@ export async function weakenedTest(context: ModeContext): Promise<ModeOutcome> {
   const testPath = join(project.dir, "test", "label.test.ts");
   const before = readFileSync(testPath, "utf8");
   const after = before.replace('"Total: $1,234.50"', String.raw`"Total: $1\u202f234.50"`);
-  if (after === before)
+  if (after === before) {
     throw new Error("The weakened-test control could not find the assertion to rewrite.");
+  }
   writeFileSync(testPath, after);
 
   await mustRun("npm", ["install", "--no-audit", "--no-fund"], { cwd: project.dir });

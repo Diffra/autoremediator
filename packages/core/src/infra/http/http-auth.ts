@@ -62,8 +62,9 @@ export function verifyJwtRole(token: string, secret: string): Role | undefined {
     // Role resolution from claims
     const possibleRoles: string[] = [];
     if (typeof payload.role === "string") possibleRoles.push(payload.role);
-    if (Array.isArray(payload.roles))
+    if (Array.isArray(payload.roles)) {
       possibleRoles.push(...payload.roles.filter((r): r is string => typeof r === "string"));
+    }
     if (typeof payload.scope === "string") possibleRoles.push(...payload.scope.split(" "));
 
     if (possibleRoles.includes("admin")) return "admin";
@@ -201,9 +202,14 @@ export function authorizeRole(
     return { ok: false, status: 401, error: "Unauthorized: Missing or invalid Bearer token" };
   }
 
-  const userRole = getRoleForToken(authHeader.slice("Bearer ".length).trim());
-  if (!userRole)
+  const userRole = getRoleForToken(
+    authHeader.slice("Bearer ".length).trim(),
+    env["AUTOREMEDIATOR_API_TOKENS"],
+    env["AUTOREMEDIATOR_JWT_SECRET"],
+  );
+  if (!userRole) {
     return { ok: false, status: 401, error: "Unauthorized: Invalid or expired API token" };
+  }
 
   if (ROLE_HIERARCHY[userRole] < ROLE_HIERARCHY[requiredRole]) {
     return {

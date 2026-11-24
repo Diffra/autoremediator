@@ -79,7 +79,7 @@ function changedCheck(from: string, to: string): string {
  * Without those lines (run by hand, or by a manager that does not forward them) it falls back to
  * the checked-out branch against its upstream.
  */
-const PRE_PUSH = (dir: string, range: string): string => `autoremediator_pre_push_check() {
+const PRE_PUSH_CHECK = (range: string): string => `autoremediator_pre_push_check() {
   ar_base="$1"
   ar_head="$2"
   if ! git rev-parse --verify -q "$ar_base^{commit}" >/dev/null 2>&1; then
@@ -115,7 +115,9 @@ ${resolveCli(range)}
   esac
   rm -f "$ar_out"
   return 0
-}
+}`;
+
+const PRE_PUSH = (dir: string, range: string): string => `${PRE_PUSH_CHECK(range)}
 autoremediator_pre_push() {
   [ "\${AUTOREMEDIATOR_SKIP_HOOKS:-}" = "1" ] && return 0
   ar_limit="\${AUTOREMEDIATOR_HOOK_TIMEOUT:-60}"

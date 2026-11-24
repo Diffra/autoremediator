@@ -127,7 +127,7 @@ trust. Checks run cheapest first and stop at the first failure; the rest are rep
 | ----- | ----------- |
 | `scope` | Only dependency files changed: manifests, lockfiles, patch files, package-manager state. Never CI workflows, the policy file, `.git` or `node_modules`; project source only when the change is allowed to edit it. Skipped outside a git repository |
 | `policy` | Every changed dependency is allowed by `allowPackages`/`denyPackages`, major bumps are allowed, and `directDependenciesOnly`/`preferVersionBump` are respected |
-| `supply-chain` | Each new version passes the age, install-script and provenance rules, including your package manager's cooldown |
+| `supply-chain` | Each new version passes the age, install-script and provenance rules, including your package manager's cooldown. A dependency moved to a git or URL source, a package alias or a tag has no registry version to vet, so it fails this check; `file:`, `link:`, `portal:` and `workspace:` specs are not vetted |
 | `install` | A frozen install succeeds, so the lockfile matches the manifests |
 | `vuln-gone` | No installed package still matches the advisory (findings the plan knowingly left are excepted) |
 | `typecheck`, `tests` | The type checker and test script pass, when requested |
@@ -150,6 +150,10 @@ the project or roll the run back.
 dependencies from the restored lockfile (a frozen install), so `node_modules` matches again. Pass
 `reinstall: false` to skip that. If the reinstall fails, the files are still restored and the report
 says so.
+
+A file the rollback cannot put back (a read-only file, a failed write) makes it fail with a
+`rollback-failed` error that lists the files, instead of reporting a clean rollback. Every other file
+is still restored first.
 
 A rollback is refused when the project changed since the run's last step, because restoring would
 discard that work; `--force` overrides it. The report says whether the project matches the state the

@@ -63,9 +63,9 @@ function parseDiff(diff: string): ParsedFile[] {
       continue;
     }
     if (!current) continue;
-    if (/^(new|deleted) file mode /.test(line))
+    if (/^(new|deleted) file mode /.test(line)) {
       current.skip = line.startsWith("new") ? "a new file" : "a deleted file";
-    else if (/^(old|new) mode /.test(line)) current.skip = "a file mode change";
+    } else if (/^(old|new) mode /.test(line)) current.skip = "a file mode change";
     else if (/^(rename|copy) (from|to) /.test(line)) current.skip = "renamed or copied";
     else if (/^(Binary files |GIT binary patch)/.test(line)) current.skip = "binary";
     const hunk = HUNK.exec(line);
@@ -117,11 +117,17 @@ function regionsOf(hunk: ParsedHunk): RecipeHunk[] {
       index += 1;
     }
     const before: string[] = [];
-    for (let back = start - 1; back >= 0 && lines[back]!.kind === " "; back -= 1)
+    for (let back = start - 1; back >= 0 && lines[back]!.kind === " "; back -= 1) {
       before.unshift(lines[back]!.text);
+    }
     const after: string[] = [];
-    for (let forward = index; forward < lines.length && lines[forward]!.kind === " "; forward += 1)
+    for (
+      let forward = index;
+      forward < lines.length && lines[forward]!.kind === " ";
+      forward += 1
+    ) {
       after.push(lines[forward]!.text);
+    }
     regions.push({ before, remove, add, after });
   }
   return regions;
@@ -136,8 +142,9 @@ export function captureRecipe(input: CaptureInput): CaptureResult {
   for (const file of parseDiff(input.diff)) {
     if (!input.isSource(file.path)) {
       // Dependency files change through the upgrade itself; they are not part of what was learned.
-      if (file.hunks.length > 0 || file.skip)
+      if (file.hunks.length > 0 || file.skip) {
         skipped.push({ file: file.path, reason: "not project source" });
+      }
       continue;
     }
     if (file.skip) {
@@ -153,8 +160,9 @@ export function captureRecipe(input: CaptureInput): CaptureResult {
       }
     }
   }
-  if (hunks.length === 0)
+  if (hunks.length === 0) {
     throw new Error("the repair changed no project source that a recipe can describe");
+  }
 
   const candidate = {
     schemaVersion: RECIPE_SCHEMA_VERSION,

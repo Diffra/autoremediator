@@ -73,8 +73,12 @@ export function readBody(req: http.IncomingMessage): Promise<unknown> {
  * capped in length. Never a stack trace, never the object's own string form (which can carry one).
  */
 export function publicErrorMessage(error: unknown): string {
-  const message =
-    error instanceof Error ? error.message : typeof error === "string" ? error : "Request failed";
+  let message = "Request failed";
+  if (error instanceof Error) {
+    message = error.message;
+  } else if (typeof error === "string") {
+    message = error;
+  }
   const [firstLine = ""] = message.split(/\r?\n/, 1);
   const trimmed = firstLine.trim().slice(0, 500);
   return trimmed === "" ? "Request failed" : trimmed;

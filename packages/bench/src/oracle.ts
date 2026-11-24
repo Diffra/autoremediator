@@ -82,10 +82,11 @@ async function headSha(project: Project, env: NodeJS.ProcessEnv): Promise<string
 function canonical(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map((entry) => canonical(entry)).join(",")}]`;
   if (value !== null && typeof value === "object") {
-    return `{${Object.entries(value as Record<string, unknown>)
-      .toSorted(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
-      .map(([key, entry]) => `${JSON.stringify(key)}:${canonical(entry)}`)
-      .join(",")}}`;
+    const record = value as Record<string, unknown>;
+    const entries = Object.keys(record)
+      .toSorted()
+      .map((key) => `${JSON.stringify(key)}:${canonical(record[key])}`);
+    return `{${entries.join(",")}}`;
   }
   return JSON.stringify(value) ?? "null";
 }
@@ -153,8 +154,9 @@ export function manifestProblems(baseline: unknown, current: unknown, target: st
     if (isObject(left) && isObject(right)) {
       // Name the entries that differ ("scripts.test"), not just the field.
       for (const name of [...new Set([...Object.keys(left), ...Object.keys(right)])].toSorted()) {
-        if (canonical(left[name]) !== canonical(right[name]))
+        if (canonical(left[name]) !== canonical(right[name])) {
           problems.push(`${key}.${name} changed`);
+        }
       }
     } else {
       problems.push(`${key} changed`);
@@ -318,65 +320,94 @@ export async function judge(
     }
     pass = fixed;
   } else {
-    const installed = [
-      ...(installedVersions(project.dir).get(task.vulnerable.packageName) ?? []),
-    ].toSorted();
-    const same =
-      JSON.stringify(installed) === JSON.stringify([...project.vulnerableVersions].toSorted());
-    const { reason, canary } = task.expect;
-    const reasonOk = reason === undefined || observed.unresolvedReasons.includes(reason);
-    const canaryPresent = canary !== undefined && existsSync(join(project.dir, canary));
-    checks.push(
-      {
-        name: "unchanged",
-        ok: unchanged,
-        detail: unchanged ? "no file changed" : `changed: ${changed.join(", ") || "(HEAD moved)"}`,
-      },
-      {
-        name: "still-vulnerable",
-        ok: same,
-        detail: same
-          ? `${task.vulnerable.packageName}@${installed.join(", ")} still installed, as before`
-          : `installed ${task.vulnerable.packageName} changed: ${installed.join(", ") || "none"}`,
-      },
-      {
-        name: "no-false-claim",
-        ok: !observed.claimedSuccess,
-        detail: observed.claimedSuccess
-          ? "the tool reported a fix it should not have"
-          : "no fix was claimed",
-      },
-      {
-        name: "reason",
-        ok: reasonOk,
-        detail:
-          reason === undefined
-            ? "no particular reason required"
-            : reasonOk
-              ? `reported ${reason}`
-              : `expected ${reason}, reported ${observed.unresolvedReasons.join(", ") || "nothing"}`,
-      },
-    );
-    if (canary !== undefined) {
-      checks.push({
-        name: "canary-absent",
-        ok: !canaryPresent,
-        detail: canaryPresent
-          ? `${canary} exists: an install script ran`
-          : `${canary} does not exist`,
-      });
-    }
+    checks.push(...refusalChecks(task, project, observed, changed, unchanged));
     pass = checks.every((check) => check.ok) && !fixed;
   }
 
-  let outcome: ObservedOutcome;
-  if (fixed) outcome = "fixed";
-  else if (observed.claimedSuccess) outcome = "false-claim";
-  else if (!unchanged) outcome = "broken";
-  else
-    outcome = observed.unresolvedReasons.some((r) => REFUSAL_REASONS.has(r))
-      ? "refused"
-      : "unresolved";
-
+  const outcome = observedOutcome(fixed, unchanged, observed);
   return { score: pass ? "PASS" : "FAIL", outcome, checks, changedFiles: changed.length };
+}
+
+function observedOutcome(fixed: boolean, unchanged: boolean, observed: Observed): ObservedOutcome {
+  if (fixed) {
+    return "fixed";
+  }
+  if (observed.claimedSuccess) {
+    return "false-claim";
+  }
+  if (!unchanged) {
+    return "broken";
+  }
+  return observed.unresolvedReasons.some((reason) => REFUSAL_REASONS.has(reason))
+    ? "refused"
+    : "unresolved";
+}
+
+/** The checks for a task that must be left alone: nothing changed, the tool refused honestly. */
+function refusalChecks(
+  task: LoadedTask,
+  project: Project,
+  observed: Observed,
+  changed: readonly string[],
+  unchanged: boolean,
+): Check[] {
+  const checks: Check[] = [];
+  const installed = [
+    ...(installedVersions(project.dir).get(task.vulnerable.packageName) ?? []),
+  ].toSorted();
+  const same =
+    JSON.stringify(installed) === JSON.stringify([...project.vulnerableVersions].toSorted());
+  const { reason, canary } = task.expect;
+  const reasonOk = reason === undefined || observed.unresolvedReasons.includes(reason);
+  const canaryPresent = canary !== undefined && existsSync(join(project.dir, canary));
+  checks.push(
+    {
+      name: "unchanged",
+      ok: unchanged,
+      detail: unchanged ? "no file changed" : `changed: ${changed.join(", ") || "(HEAD moved)"}`,
+    },
+    {
+      name: "still-vulnerable",
+      ok: same,
+      detail: same
+        ? `${task.vulnerable.packageName}@${installed.join(", ")} still installed, as before`
+        : `installed ${task.vulnerable.packageName} changed: ${installed.join(", ") || "none"}`,
+    },
+    {
+      name: "no-false-claim",
+      ok: !observed.claimedSuccess,
+      detail: observed.claimedSuccess
+        ? "the tool reported a fix it should not have"
+        : "no fix was claimed",
+    },
+    {
+      name: "reason",
+      ok: reasonOk,
+      detail: reasonDetail(reason, reasonOk, observed.unresolvedReasons),
+    },
+  );
+  if (canary !== undefined) {
+    checks.push({
+      name: "canary-absent",
+      ok: !canaryPresent,
+      detail: canaryPresent
+        ? `${canary} exists: an install script ran`
+        : `${canary} does not exist`,
+    });
+  }
+  return checks;
+}
+
+function reasonDetail(
+  reason: string | undefined,
+  reasonOk: boolean,
+  reported: readonly string[],
+): string {
+  if (reason === undefined) {
+    return "no particular reason required";
+  }
+  if (reasonOk) {
+    return `reported ${reason}`;
+  }
+  return `expected ${reason}, reported ${reported.join(", ") || "nothing"}`;
 }

@@ -111,15 +111,12 @@ function observeRun(
         candidate.fromVersion === result.fromVersion,
     );
     const outcome = item ? done.get(item.itemId) : undefined;
+    const toVersion = item?.toVersion || result.toVersion;
     return {
       cveId: report.cveId,
       name: result.packageName,
       fromVersion: result.fromVersion,
-      ...(item?.toVersion
-        ? { toVersion: item.toVersion }
-        : result.toVersion
-          ? { toVersion: result.toVersion }
-          : {}),
+      ...(toVersion ? { toVersion } : {}),
       runId: run.runId,
       planned: item !== undefined,
       applied: Boolean(outcome?.applied) && run.status !== "rolled-back",
@@ -283,24 +280,8 @@ export function collectFindings(input: {
     const suppression = suppressedCves.get(cveId.toUpperCase());
     const runIds = [...new Set(observations.map((observation) => observation.runId))];
     if (suppression) {
-      const statement = suppressionStatement(suppression);
-      const finding: VexFinding = {
-        cveId,
-        status: statement.status,
-        component: { name: observations[0]!.name, version: observations[0]!.fromVersion },
-        basis: "policy",
-        runIds,
-        detail: statement.detail,
-        impactStatement: statement.impactStatement,
-        ...(statement.openVexJustification
-          ? { openVexJustification: statement.openVexJustification }
-          : {}),
-        ...(statement.cycloneDxJustification
-          ? { cycloneDxJustification: statement.cycloneDxJustification }
-          : {}),
-        updateAvailable: false,
-      };
-      findings.push(finding);
+      const component = { name: observations[0]!.name, version: observations[0]!.fromVersion };
+      findings.push(suppressionFinding(suppression, cveId, runIds, component));
       continue;
     }
     findings.push({
@@ -315,23 +296,7 @@ export function collectFindings(input: {
   const seen = new Set(findings.map((finding) => finding.cveId.toUpperCase()));
   for (const [cveId, suppression] of suppressedCves) {
     if (seen.has(cveId)) continue;
-    const statement = suppressionStatement(suppression);
-    const finding: VexFinding = {
-      cveId: suppression.cveId,
-      status: statement.status,
-      basis: "policy",
-      runIds: [],
-      detail: statement.detail,
-      impactStatement: statement.impactStatement,
-      ...(statement.openVexJustification
-        ? { openVexJustification: statement.openVexJustification }
-        : {}),
-      ...(statement.cycloneDxJustification
-        ? { cycloneDxJustification: statement.cycloneDxJustification }
-        : {}),
-      updateAvailable: false,
-    };
-    findings.push(finding);
+    findings.push(suppressionFinding(suppression, suppression.cveId, []));
   }
 
   return {
@@ -345,5 +310,31 @@ export function collectFindings(input: {
     cves,
     usedRuns,
     notes,
+  };
+}
+
+/** A finding the project asserted itself, through a policy suppression rather than a recorded run. */
+function suppressionFinding(
+  suppression: VexSuppression,
+  cveId: string,
+  runIds: string[],
+  component?: { name: string; version: string },
+): VexFinding {
+  const statement = suppressionStatement(suppression);
+  return {
+    cveId,
+    status: statement.status,
+    ...(component ? { component } : {}),
+    basis: "policy",
+    runIds,
+    detail: statement.detail,
+    impactStatement: statement.impactStatement,
+    ...(statement.openVexJustification
+      ? { openVexJustification: statement.openVexJustification }
+      : {}),
+    ...(statement.cycloneDxJustification
+      ? { cycloneDxJustification: statement.cycloneDxJustification }
+      : {}),
+    updateAvailable: false,
   };
 }

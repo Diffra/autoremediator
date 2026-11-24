@@ -40,12 +40,7 @@ export function run(
         maxBuffer: 32 * 1024 * 1024,
       },
       (error, stdout, stderr) => {
-        const code =
-          error === null
-            ? 0
-            : typeof (error as { code?: unknown }).code === "number"
-              ? (error as { code: number }).code
-              : 1;
+        const code = exitCodeOf(error);
         resolve({
           code,
           stdout,
@@ -131,4 +126,13 @@ export function applyHermeticEnv(
   delete process.env["npm_config_registry"];
   delete process.env["NPM_CONFIG_REGISTRY"];
   return vars;
+}
+
+/** The process exit code, or 1 when the failure carries no numeric code (a timeout, a spawn error). */
+function exitCodeOf(error: Error | null): number {
+  if (error === null) {
+    return 0;
+  }
+  const { code } = error as { code?: unknown };
+  return typeof code === "number" ? code : 1;
 }

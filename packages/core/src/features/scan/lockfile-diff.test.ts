@@ -128,4 +128,25 @@ packages:
       expect(deps.get("@scope/my-pkg")?.has("1.0.2")).toBe(true);
     });
   });
+
+  describe("damaged lockfiles", () => {
+    it("rejects a package-lock.json that is not JSON, naming the file", () => {
+      expect(() => parseLockfileDependencies("package-lock.json", "<<<<<<< HEAD\n{}")).toThrow(
+        /package-lock\.json/,
+      );
+    });
+
+    it("rejects a pnpm-lock.yaml that is not YAML, naming the file", () => {
+      expect(() => parseLockfileDependencies("pnpm-lock.yaml", "packages: [unclosed")).toThrow(
+        /pnpm-lock\.yaml/,
+      );
+    });
+
+    it("does not read a damaged new lockfile as every dependency having been removed", () => {
+      const old = JSON.stringify({ packages: { "node_modules/a": { version: "1.0.0" } } });
+      expect(() => computeLockfileDiff("package-lock.json", old, "not json")).toThrow(
+        /package-lock\.json/,
+      );
+    });
+  });
 });

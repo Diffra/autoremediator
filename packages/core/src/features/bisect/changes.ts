@@ -43,8 +43,9 @@ export function lockfileChanges(
   for (const name of [...new Set([...before.keys(), ...after.keys()])].toSorted()) {
     const was = [...(before.get(name) ?? [])].toSorted();
     const now = [...(after.get(name) ?? [])].toSorted();
-    if (was.length === now.length && was.every((version, index) => version === now[index]))
+    if (was.length === now.length && was.every((version, index) => version === now[index])) {
       continue;
+    }
 
     const [from] = was;
     const [to] = now;
@@ -58,13 +59,22 @@ export function lockfileChanges(
       continue;
     }
 
-    const reason =
-      was.length === 0
-        ? "added at the bad ref"
-        : now.length === 0
-          ? "removed at the bad ref"
-          : "several versions are locked, so a single pin cannot stand for it";
-    skipped.push({ packageName: name, fromVersions: was, toVersions: now, reason });
+    skipped.push({
+      packageName: name,
+      fromVersions: was,
+      toVersions: now,
+      reason: skipReason(was, now),
+    });
   }
   return { updates, skipped };
+}
+
+function skipReason(was: readonly string[], now: readonly string[]): string {
+  if (was.length === 0) {
+    return "added at the bad ref";
+  }
+  if (now.length === 0) {
+    return "removed at the bad ref";
+  }
+  return "several versions are locked, so a single pin cannot stand for it";
 }

@@ -3,50 +3,42 @@
  * it only if a deterministic harness proves it (fails on the vulnerable version, passes on the
  * fixed one, repeatably, in a sandbox). See `docs/guides/proof-of-fix-generation.md`.
  */
-import {
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  realpathSync,
-  rmSync,
-  writeFileSync,
-} from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { getModelSpec } from "../../infra/config.js";
-import { SANDBOX_ENV, type SandboxReport, verifySandbox } from "../../shared/exec/sandbox.js";
+import { type SandboxReport, verifySandbox } from "../../shared/exec/sandbox.js";
 import { sha256 } from "../../shared/hash.js";
 import { findVulnerableSymbols } from "../impact/fix-diff.js";
 import { isAdvisoryId } from "../incident/target.js";
 import { resolvePatchesDir } from "../patch/artifacts/helpers.js";
 import { resolveLanguageModel } from "../patch/model.js";
 import type { ProofEvidenceRef } from "../vex/index.js";
-import { choosePackage, chooseVersions, lookupAdvisoryOsv } from "./advisory.js";
+import { choosePackage, chooseVersions, contextFor, lookupAdvisoryOsv } from "./advisory.js";
 import { createBuiltinReproductionAgent } from "./agent.js";
 import {
   baseName,
-  CLAIM,
   EVIDENCE_SUFFIX,
   findEvidence,
   loadSigningKey,
   type ProofEvidence,
   relativeTo,
   scriptFileName,
-  SIGNATURE_SUFFIX,
-  signRecord,
 } from "./evidence.js";
-import { CONFIRM_RUNS, createHarness } from "./harness.js";
+import { createHarness } from "./harness.js";
 import { fetchVerifiedPackage, installFetchedPackage, listPublishedVersions } from "./install.js";
+import { keepProof, MAX_OUTPUT_BYTES } from "./keep.js";
+import { createTrialRunner } from "./trial-runner.js";
 import type {
+  TrialSummary,
   AdvisoryContext,
   AdvisoryLookup,
   FetchedPackage,
   ModelResolver,
   ReproductionAgent,
+  ReproductionOutcome,
   ReproductionUsage,
-  TrialResult,
 } from "./types.js";
 
 export type { ProofEvidenceRef } from "../vex/index.js";
@@ -75,6 +67,7 @@ export type {
   ReproductionTask,
   RunVerdict,
   TrialResult,
+  TrialSummary,
 } from "./types.js";
 
 export interface ProveOptions {
@@ -100,14 +93,6 @@ export interface ProveOptions {
   overwrite?: boolean;
   /** Agent that proposes scripts, instead of one built from `model`. SDK only. */
   agent?: ReproductionAgent;
-}
-
-export interface TrialSummary {
-  attempt: number;
-  accepted: boolean;
-  stage: TrialResult["stage"];
-  reason: string;
-  scriptSha256: string;
 }
 
 export interface ProveResult {
@@ -151,7 +136,6 @@ export const defaultProveDeps: ProveDeps = {
 
 const DEFAULT_MAX_TRIALS = 4;
 const DEFAULT_RUN_TIMEOUT_MS = 10_000;
-const MAX_OUTPUT_BYTES = 256 * 1024;
 const AGENT_WALL_MS = 10 * 60_000;
 
 const NO_MODEL =
@@ -164,110 +148,36 @@ async function resolveAgent(options: ProveOptions, deps: ProveDeps): Promise<Rep
   return createBuiltinReproductionAgent(await deps.resolveModel(spec));
 }
 
-function contextFor(
-  id: string,
-  looked: AdvisoryLookup | undefined,
-  advisoryText: string | undefined,
-): AdvisoryContext {
-  if (looked && !advisoryText) return looked.context;
-  if (looked && advisoryText) {
-    return {
-      ...looked.context,
-      details: `${advisoryText}\n\n${looked.context.details ?? ""}`.trim(),
-    };
-  }
-  const text = advisoryText ?? "";
-  return {
-    id,
-    summary: text.split("\n")[0]?.slice(0, 300) ?? id,
-    details: text,
-    cwes: [],
-    references: [],
-    source: "user",
-  };
-}
-
-/** Run trials one at a time: they share the two directories. */
-function serialize<T>(): (task: () => Promise<T>) => Promise<T> {
-  let tail: Promise<unknown> = Promise.resolve();
-  return (task) => {
-    const next = tail.then(task, task);
-    tail = next.catch(() => undefined);
-    return next;
-  };
-}
-
 export async function generateProofOfFix(
   cveId: string,
   options: ProveOptions = {},
   deps: ProveDeps = defaultProveDeps,
 ): Promise<ProveResult> {
-  const typedId = cveId.trim();
-  const advisoryId = isAdvisoryId(typedId) ? normalizeAdvisoryId(typedId) : typedId;
-  if (advisoryId === "")
-    throw new Error(
-      "Name the advisory: a CVE or GHSA id, or any label together with advisoryText.",
-    );
-  if (!options.advisoryText && !isAdvisoryId(advisoryId)) {
-    throw new Error(
-      `"${advisoryId.slice(0, 80)}" is not an advisory id (CVE-, GHSA-, OSV-, MAL-). Give one, or pass advisoryText to describe the vulnerability yourself.`,
-    );
-  }
+  const advisoryId = requireAdvisoryId(cveId, options.advisoryText);
   const cwd = options.cwd ?? process.cwd();
-  const maxTrials = Math.min(10, Math.max(1, Math.trunc(options.maxTrials ?? DEFAULT_MAX_TRIALS)));
-  const timeoutMs = Math.min(
-    60_000,
-    Math.max(1000, Math.trunc(options.timeoutMs ?? DEFAULT_RUN_TIMEOUT_MS)),
-  );
+  const { maxTrials, timeoutMs } = clampLimits(options);
 
   // Everything that can fail cheaply fails before the network is touched or a model is paid for.
   const agent = await resolveAgent(options, deps);
   const signingKey = options.signingKeyPath ? loadSigningKey(options.signingKeyPath) : undefined;
   const sandbox = await verifySandbox();
 
-  const looked = isAdvisoryId(advisoryId) ? await deps.lookupAdvisory(advisoryId) : undefined;
-  if (!looked && !options.advisoryText) {
-    throw new Error(
-      `${advisoryId} was not found in OSV. Check the id, or pass advisoryText with the package and versions.`,
-    );
-  }
-  const advisory = contextFor(looked?.context.id ?? advisoryId, looked, options.advisoryText);
-  const packageName = choosePackage(options.package, looked?.affected ?? []);
-  const published = options.vulnerableVersion ? [] : await deps.listVersions(packageName, cwd);
-  const { vulnerableVersion, fixedVersion } = chooseVersions({
-    packageName,
-    affected: looked?.affected ?? [],
-    published,
-    vulnerableVersion: options.vulnerableVersion,
-    fixedVersion: options.fixedVersion,
-  });
-
-  const patchesPath = resolvePatchesDir(cwd, options.patchesDir);
-  const scriptPath = join(patchesPath, scriptFileName(packageName, vulnerableVersion));
-  const evidencePath = join(
-    patchesPath,
-    `${baseName(packageName, vulnerableVersion)}${EVIDENCE_SUFFIX}`,
+  const { advisory, packageName, vulnerableVersion, fixedVersion } = await resolveTarget(
+    deps,
+    options,
+    advisoryId,
+    cwd,
   );
-  if (existsSync(scriptPath) && !options.overwrite && !ownedByEvidence(scriptPath, evidencePath)) {
-    throw new Error(
-      `${relativeTo(cwd, scriptPath)} already exists and was not written by this command. Review it, or pass overwrite to replace it.`,
-    );
-  }
 
-  const root = realpathSync(mkdtempSync(join(tmpdir(), "autoremediator-prove-")));
+  const paths = outputPaths(cwd, options, packageName, vulnerableVersion);
+
+  const { root, vulnerableDir, fixedDir } = createWorkDirs();
   try {
-    const vulnerableDir = join(root, "vulnerable");
-    const fixedDir = join(root, "fixed");
-    mkdirSync(vulnerableDir);
-    mkdirSync(fixedDir);
-    const [vulnerable, fixed] = await Promise.all([
-      deps.fetchPackage(packageName, vulnerableVersion, cwd),
-      deps.fetchPackage(packageName, fixedVersion, cwd),
-    ]);
-    await Promise.all([
-      deps.install(vulnerableDir, vulnerable, cwd),
-      deps.install(fixedDir, fixed, cwd),
-    ]);
+    const [vulnerable, fixed] = await fetchAndInstall(deps, cwd, {
+      packageName,
+      vulnerable: { version: vulnerableVersion, dir: vulnerableDir },
+      fixed: { version: fixedVersion, dir: fixedDir },
+    });
 
     const candidates = candidateLines(vulnerable, fixed, advisory);
     const harness = createHarness({
@@ -280,31 +190,7 @@ export async function generateProofOfFix(
       maxOutputBytes: MAX_OUTPUT_BYTES,
     });
 
-    const trials: TrialSummary[] = [];
-    const keep: { value?: { script: string; result: TrialResult } } = {};
-    const exclusive = serialize<TrialResult>();
-    const trial = (script: string): Promise<TrialResult> =>
-      exclusive(async () => {
-        if (keep.value) return keep.value.result;
-        if (trials.length >= maxTrials) {
-          return {
-            accepted: false,
-            stage: "screen",
-            scriptSha256: sha256(script),
-            reason: "No tries are left; the script was not run.",
-          };
-        }
-        const result = await harness.prove(script);
-        trials.push({
-          attempt: trials.length + 1,
-          accepted: result.accepted,
-          stage: result.stage,
-          reason: result.reason,
-          scriptSha256: result.scriptSha256,
-        });
-        if (result.accepted) keep.value = { script, result };
-        return result;
-      });
+    const { trials, keep, trial } = createTrialRunner(harness, maxTrials);
 
     const outcome = await agent.propose(
       { advisory, packageName, vulnerableVersion, fixedVersion, candidates, maxTrials },
@@ -316,88 +202,38 @@ export async function generateProofOfFix(
       },
     );
 
-    const base = {
-      schemaVersion: "1.0" as const,
+    const base = proofHeader({
       advisoryId,
-      package: packageName,
+      packageName,
       vulnerableVersion,
       fixedVersion,
       trials,
-      agent: { id: agent.id, status: outcome.status, rationale: outcome.rationale },
-      usage: outcome.usage,
+      agent,
+      outcome,
       sandbox,
-    };
+    });
 
-    if (!keep.value) {
-      const last = trials.at(-1);
-      return {
-        ...base,
-        status: "rejected",
-        reason: last
-          ? `No script was kept. The last one was rejected: ${last.reason}`
-          : `No script was kept: the agent proposed none (${outcome.status}: ${outcome.rationale}).`,
-      };
-    }
+    if (!keep.value) return rejectedProof(base, trials, outcome);
 
-    const { script, result } = keep.value;
-    const record: ProofEvidence = {
-      schemaVersion: "1.0",
-      kind: "proof-of-fix-evidence",
+    return keepProof({
+      base,
+      keep: keep.value,
+      advisory,
       advisoryId,
-      ...(advisory.id !== advisoryId ? { aliases: [advisory.id] } : {}),
-      package: packageName,
+      packageName,
       vulnerableVersion,
       fixedVersion,
-      claim: CLAIM,
-      script: {
-        path: relativeTo(cwd, scriptPath),
-        sha256: sha256(script),
-      },
-      vulnerableRun: result.vulnerableRun!,
-      fixedRun: result.fixedRun!,
-      confirmedRuns: CONFIRM_RUNS,
-      tarballs: {
-        vulnerable: { url: vulnerable.tarballUrl, integrity: vulnerable.integrity },
-        fixed: { url: fixed.tarballUrl, integrity: fixed.integrity },
-      },
-      sandbox: {
-        ...sandbox,
-        env: Object.keys(SANDBOX_ENV),
-        timeoutMs,
-        maxOutputBytes: MAX_OUTPUT_BYTES,
-      },
-      nodeVersion: process.version,
-      timestamp: deps.now().toISOString(),
-      model: outcome.usage[0]?.model ?? null,
-      agent: agent.id,
-      trials: trials.length,
-    };
-
-    mkdirSync(patchesPath, { recursive: true });
-    const recordText = `${JSON.stringify(record, null, 2)}\n`;
-    writeFileSync(scriptPath, script, "utf8");
-    writeFileSync(evidencePath, recordText, "utf8");
-    let signaturePath: string | undefined;
-    if (signingKey) {
-      signaturePath = `${evidencePath}${SIGNATURE_SUFFIX}`;
-      writeFileSync(
-        signaturePath,
-        `${JSON.stringify(signRecord(Buffer.from(recordText, "utf8"), signingKey), null, 2)}\n`,
-        "utf8",
-      );
-    }
-
-    return {
-      ...base,
-      status: "kept",
-      reason: result.reason,
-      evidence: record,
-      files: {
-        script: relativeTo(cwd, scriptPath),
-        evidence: relativeTo(cwd, evidencePath),
-        ...(signaturePath ? { signature: relativeTo(cwd, signaturePath) } : {}),
-      },
-    };
+      fetched: { vulnerable, fixed },
+      sandbox,
+      timeoutMs,
+      cwd,
+      paths,
+      signingKey,
+      agent,
+      outcome,
+      trials,
+      now: deps.now(),
+    });
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -457,4 +293,148 @@ export function proofEvidenceRefs(cwd: string, patchesDir?: string): ProofEviden
       scriptSha256: found.record.script.sha256,
       signed: found.signaturePath !== undefined,
     }));
+}
+
+/** The advisory id to work on: a normalised id, or a label that comes with advisoryText. */
+function requireAdvisoryId(cveId: string, advisoryText: string | undefined): string {
+  const typedId = cveId.trim();
+  const advisoryId = isAdvisoryId(typedId) ? normalizeAdvisoryId(typedId) : typedId;
+  if (advisoryId === "") {
+    throw new Error(
+      "Name the advisory: a CVE or GHSA id, or any label together with advisoryText.",
+    );
+  }
+  if (!advisoryText && !isAdvisoryId(advisoryId)) {
+    throw new Error(
+      `"${advisoryId.slice(0, 80)}" is not an advisory id (CVE-, GHSA-, OSV-, MAL-). Give one, or pass advisoryText to describe the vulnerability yourself.`,
+    );
+  }
+  return advisoryId;
+}
+
+function clampLimits(options: ProveOptions): { maxTrials: number; timeoutMs: number } {
+  const maxTrials = Math.min(10, Math.max(1, Math.trunc(options.maxTrials ?? DEFAULT_MAX_TRIALS)));
+  const timeoutMs = Math.min(
+    60_000,
+    Math.max(1000, Math.trunc(options.timeoutMs ?? DEFAULT_RUN_TIMEOUT_MS)),
+  );
+  return { maxTrials, timeoutMs };
+}
+
+/** Where the script and its evidence go; a script this command did not write is never replaced silently. */
+function outputPaths(
+  cwd: string,
+  options: ProveOptions,
+  packageName: string,
+  vulnerableVersion: string,
+): { patchesPath: string; scriptPath: string; evidencePath: string } {
+  const patchesPath = resolvePatchesDir(cwd, options.patchesDir);
+  const scriptPath = join(patchesPath, scriptFileName(packageName, vulnerableVersion));
+  const evidencePath = join(
+    patchesPath,
+    `${baseName(packageName, vulnerableVersion)}${EVIDENCE_SUFFIX}`,
+  );
+  if (existsSync(scriptPath) && !options.overwrite && !ownedByEvidence(scriptPath, evidencePath)) {
+    throw new Error(
+      `${relativeTo(cwd, scriptPath)} already exists and was not written by this command. Review it, or pass overwrite to replace it.`,
+    );
+  }
+  return { patchesPath, scriptPath, evidencePath };
+}
+
+async function fetchAndInstall(
+  deps: ProveDeps,
+  cwd: string,
+  target: {
+    packageName: string;
+    vulnerable: { version: string; dir: string };
+    fixed: { version: string; dir: string };
+  },
+): Promise<[FetchedPackage, FetchedPackage]> {
+  const { packageName, vulnerable, fixed } = target;
+  const [vulnerableFetched, fixedFetched] = await Promise.all([
+    deps.fetchPackage(packageName, vulnerable.version, cwd),
+    deps.fetchPackage(packageName, fixed.version, cwd),
+  ]);
+  await Promise.all([
+    deps.install(vulnerable.dir, vulnerableFetched, cwd),
+    deps.install(fixed.dir, fixedFetched, cwd),
+  ]);
+  return [vulnerableFetched, fixedFetched];
+}
+
+function rejectedProof(
+  base: Omit<ProveResult, "status" | "reason">,
+  trials: TrialSummary[],
+  outcome: { status: string; rationale: string },
+): ProveResult {
+  const last = trials.at(-1);
+  return {
+    ...base,
+    status: "rejected",
+    reason: last
+      ? `No script was kept. The last one was rejected: ${last.reason}`
+      : `No script was kept: the agent proposed none (${outcome.status}: ${outcome.rationale}).`,
+  };
+}
+
+/** The advisory, the package it is about and the two versions to compare. */
+async function resolveTarget(
+  deps: ProveDeps,
+  options: ProveOptions,
+  advisoryId: string,
+  cwd: string,
+) {
+  const looked = isAdvisoryId(advisoryId) ? await deps.lookupAdvisory(advisoryId) : undefined;
+  if (!looked && !options.advisoryText) {
+    throw new Error(
+      `${advisoryId} was not found in OSV. Check the id, or pass advisoryText with the package and versions.`,
+    );
+  }
+  const advisory = contextFor(looked?.context.id ?? advisoryId, looked, options.advisoryText);
+  const packageName = choosePackage(options.package, looked?.affected ?? []);
+  const published = options.vulnerableVersion ? [] : await deps.listVersions(packageName, cwd);
+  const { vulnerableVersion, fixedVersion } = chooseVersions({
+    packageName,
+    affected: looked?.affected ?? [],
+    published,
+    vulnerableVersion: options.vulnerableVersion,
+    fixedVersion: options.fixedVersion,
+  });
+  return { advisory, packageName, vulnerableVersion, fixedVersion };
+}
+
+function proofHeader(input: {
+  advisoryId: string;
+  packageName: string;
+  vulnerableVersion: string;
+  fixedVersion: string;
+  trials: TrialSummary[];
+  agent: ReproductionAgent;
+  outcome: ReproductionOutcome;
+  sandbox: SandboxReport;
+}) {
+  const { advisoryId, packageName, vulnerableVersion, fixedVersion } = input;
+  const { trials, agent, outcome, sandbox } = input;
+  return {
+    schemaVersion: "1.0" as const,
+    advisoryId,
+    package: packageName,
+    vulnerableVersion,
+    fixedVersion,
+    trials,
+    agent: { id: agent.id, status: outcome.status, rationale: outcome.rationale },
+    usage: outcome.usage,
+    sandbox,
+  };
+}
+
+/** A scratch directory holding one directory per version, so the two never share files. */
+function createWorkDirs(): { root: string; vulnerableDir: string; fixedDir: string } {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "autoremediator-prove-")));
+  const vulnerableDir = join(root, "vulnerable");
+  const fixedDir = join(root, "fixed");
+  mkdirSync(vulnerableDir);
+  mkdirSync(fixedDir);
+  return { root, vulnerableDir, fixedDir };
 }

@@ -84,8 +84,9 @@ export function isSubpathExported(manifest: Record<string, unknown>, subpath: st
           candidate.startsWith(before) &&
           candidate.endsWith(after) &&
           candidate.length > before.length + after.length
-        )
+        ) {
           return true;
+        }
       }
     }
   }
@@ -98,8 +99,30 @@ export function comparePackageManifests(
   project: Record<string, unknown> | undefined,
   runtimeNode: string = process.version,
 ): PackageLevelChange[] {
-  const changes: PackageLevelChange[] = [];
+  return [
+    ...compareEngines(before, after, project, runtimeNode),
+    ...compareModuleFormat(before, after),
+    ...compareExportsMap(before, after),
+    ...comparePeerDependencies(before, after, project),
+  ];
+}
 
+function runtimeNote(satisfied: boolean | undefined, runtimeNode: string): string {
+  if (satisfied === undefined) {
+    return "";
+  }
+  return satisfied
+    ? `; Node ${runtimeNode} on this machine satisfies it`
+    : `; Node ${runtimeNode} on this machine does NOT satisfy it`;
+}
+
+function compareEngines(
+  before: Record<string, unknown>,
+  after: Record<string, unknown>,
+  project: Record<string, unknown> | undefined,
+  runtimeNode: string,
+): PackageLevelChange[] {
+  const changes: PackageLevelChange[] = [];
   // Node range
   const oldNode = enginesNode(before);
   const newNode = enginesNode(after);
@@ -121,7 +144,7 @@ export function comparePackageManifests(
           severity: conflict ? "breaking" : "possibly-breaking",
           reason: conflict
             ? `engines.node narrowed to "${newNode}" and the project declares engines.node "${projectNode}", which allows versions outside it`
-            : `engines.node ${oldNode === undefined ? "was unset and is now" : `changed from "${oldNode}" to`} "${newNode}"${projectNode ? "" : "; the project declares no engines.node"}${runtimeOk === undefined ? "" : runtimeOk ? `; Node ${runtimeNode} on this machine satisfies it` : `; Node ${runtimeNode} on this machine does NOT satisfy it`}`,
+            : `engines.node ${oldNode === undefined ? "was unset and is now" : `changed from "${oldNode}" to`} "${newNode}"${projectNode ? "" : "; the project declares no engines.node"}${runtimeNote(runtimeOk, runtimeNode)}`,
           before: oldNode,
           after: newNode,
           evidence: conflict ? "project-conflict" : "unresolved",
@@ -129,7 +152,14 @@ export function comparePackageManifests(
       }
     }
   }
+  return changes;
+}
 
+function compareModuleFormat(
+  before: Record<string, unknown>,
+  after: Record<string, unknown>,
+): PackageLevelChange[] {
+  const changes: PackageLevelChange[] = [];
   // Module format
   const oldFormat = moduleFormat(before);
   const newFormat = moduleFormat(after);
@@ -155,7 +185,14 @@ export function comparePackageManifests(
       });
     }
   }
+  return changes;
+}
 
+function compareExportsMap(
+  before: Record<string, unknown>,
+  after: Record<string, unknown>,
+): PackageLevelChange[] {
+  const changes: PackageLevelChange[] = [];
   // exports map
   const oldMap = exportsMapOf(before);
   const newMap = exportsMapOf(after);
@@ -181,7 +218,15 @@ export function comparePackageManifests(
       });
     }
   }
+  return changes;
+}
 
+function comparePeerDependencies(
+  before: Record<string, unknown>,
+  after: Record<string, unknown>,
+  project: Record<string, unknown> | undefined,
+): PackageLevelChange[] {
+  const changes: PackageLevelChange[] = [];
   // Peer dependencies
   const oldPeers = stringRecord(before.peerDependencies);
   const newPeers = stringRecord(after.peerDependencies);

@@ -31,8 +31,9 @@ export function requiredRole(body: unknown): { role: Role; label: string } {
       getOperation(params.name);
     if (!operation) continue;
     const role = roleFor(operation);
-    if (ROLE_RANK[role] > ROLE_RANK[required.role])
+    if (ROLE_RANK[role] > ROLE_RANK[required.role]) {
       required = { role, label: `tool ${operation.name}` };
+    }
   }
   return required;
 }
